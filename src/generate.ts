@@ -235,7 +235,7 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
         for (const doc of version.docs) {
           if (doc.id == sideBarItem.link.id) {
             sideBarItem.id = doc.id;
-            sideBarItem.unversionedId = doc.unversionedId.split("/").pop();
+            sideBarItem.unversionedId = doc.id.split("/").pop();
             sideBarItem.permalink = doc.permalink;
             path = join(path, getPermaLink(doc, siteConfig));
             break;
@@ -260,10 +260,10 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
     case 'doc': {
       // Merge properties we need that is specified on the document.
       let path = htmlDir;
-      for (const doc of version.docs) {
-        if (doc.id == sideBarItem.id || doc.unversionedId == sideBarItem.id) {
+      for (const docjava of version.docs) {
+        if (doc.id == sideBarItem.id) {
           sideBarItem.label = doc.title;
-          sideBarItem.unversionedId = doc.unversionedId.split("/").pop();
+          sideBarItem.unversionedId = doc.id.split("/").pop();
           sideBarItem.permalink = doc.permalink;
           path = join(path, getPermaLink(doc, siteConfig));
           break;
