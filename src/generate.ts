@@ -260,7 +260,7 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
     case 'doc': {
       // Merge properties we need that is specified on the document.
       let path = htmlDir;
-      for (const docjava of version.docs) {
+      for (const doc of version.docs) {
         if (doc.id == sideBarItem.id) {
           sideBarItem.label = doc.title;
           sideBarItem.unversionedId = doc.id.split("/").pop();
