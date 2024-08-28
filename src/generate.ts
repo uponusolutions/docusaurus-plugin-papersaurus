@@ -748,17 +748,35 @@ const getPageWithFixedToc = (footerRegEx: RegExp, tocList: TocInfo[], pdfContent
     return htmlContent;
   }
 
+  const footerRegexString = footerRegEx.source;
+  const headerFooterRegexString = `.*\\n${footerRegexString}`;
+  const headerFooterRegex = new RegExp(headerFooterRegexString, footerRegEx.flags);
+
+  let pdfContentTOC = pdfContent;
+  pdfContentTOC = pdfContentTOC.replace(headerFooterRegex, '');
+  pdfContentTOC = pdfContentTOC.replace(/_/g, '');
+  pdfContentTOC = pdfContentTOC.split('\n').map(line => line.trimEnd()).join('\n');
+
+  let linesArray = pdfContentTOC.split('\n');
+  linesArray = linesArray.filter(line => line.trim() !== '');
+  let linesTOC = linesArray.slice(1, 1 + tocList.length);
+
+
   let pageIndex = 0;
-  tocList.forEach(e => {
+  let lastPageIndex = pageIndex;
+  for (let i1 = 0; i1 < tocList.length; i1++) {
+    const elementTOC = linesTOC[i1];
+    let found = false;
     for (; pageIndex < pdfPages.length; pageIndex++) {
       let page = pdfPages[pageIndex];
-      let found = false;
+      found = false;
       for (let i = 0; i < pdfHeaderRegex.length; ++i) {
-        if (pdfHeaderRegex[i](decodeHtml(e.text)).test(page)) {
+        if (pdfHeaderRegex[i](decodeHtml(elementTOC)).test(page)) {
           htmlContent = htmlContent.replace(
-            '<span class="pageNumber">_</span>',
-            `<span class="pageNumber">${pageIndex}</span>`
+              '<span class="pageNumber">_</span>',
+              `<span class="pageNumber">${pageIndex + 1}</span>`
           );
+          lastPageIndex = pageIndex;
           found = true;
           break;
         }
@@ -767,7 +785,14 @@ const getPageWithFixedToc = (footerRegEx: RegExp, tocList: TocInfo[], pdfContent
         break;
       }
     }
-  });
+    if (!found){
+      htmlContent = htmlContent.replace(
+          '<span class="pageNumber">_</span>',
+          `<span class="pageNumber">${lastPageIndex + 1}</span>`
+      );
+      pageIndex = lastPageIndex
+    }
+  }
 
   return htmlContent;
 }
