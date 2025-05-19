@@ -234,8 +234,15 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
         let path = htmlDir;
         for (const doc of version.docs) {
           if (doc.id == sideBarItem.link.id) {
+
+            const ids =  doc.id.split("/")
+            let unversionedId = ids.pop()
+            if(unversionedId == "index" && ids.length>0) {
+              unversionedId = ids.pop()
+            }
+
             sideBarItem.id = doc.id;
-            sideBarItem.unversionedId = doc.id.split("/").pop();
+            sideBarItem.unversionedId = unversionedId;
             sideBarItem.permalink = doc.permalink;
             path = join(path, getPermaLink(doc, siteConfig));
             break;
