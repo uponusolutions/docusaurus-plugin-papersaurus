@@ -221,6 +221,15 @@ function saveUrlToFileMappingsRecursive(
   }
 };
 
+function getUnversionedId(id: string): string {
+  const ids = id.split("/")
+  let unversionedId = ids.pop()!
+  if(unversionedId == "index" && ids.length>0) {
+    unversionedId = ids.pop()!
+  }
+  return unversionedId
+}
+
 function pickHtmlArticlesRecursive(sideBarItem: any,
   parentTitles: string[],
   version: LoadedVersion,
@@ -234,15 +243,8 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
         let path = htmlDir;
         for (const doc of version.docs) {
           if (doc.id == sideBarItem.link.id) {
-
-            const ids =  doc.id.split("/")
-            let unversionedId = ids.pop()
-            if(unversionedId == "index" && ids.length>0) {
-              unversionedId = ids.pop()
-            }
-
             sideBarItem.id = doc.id;
-            sideBarItem.unversionedId = unversionedId;
+            sideBarItem.unversionedId = getUnversionedId(doc.id);
             sideBarItem.permalink = doc.permalink;
             path = join(path, getPermaLink(doc, siteConfig));
             break;
@@ -251,6 +253,7 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
         readHtmlForItem(sideBarItem, parentTitles, rootDocUrl, path, version, siteConfig);
       }
       else {
+        console.log("a", sideBarItem.label)
         sideBarItem.unversionedId = sideBarItem.label || "untitled";
       }
       const newParentTitles = [...parentTitles];
@@ -270,7 +273,7 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
       for (const doc of version.docs) {
         if (doc.id == sideBarItem.id) {
           sideBarItem.label = doc.title;
-          sideBarItem.unversionedId = doc.id.split("/").pop();
+          sideBarItem.unversionedId = getUnversionedId(doc.id);
           sideBarItem.permalink = doc.permalink;
           path = join(path, getPermaLink(doc, siteConfig));
           break;
