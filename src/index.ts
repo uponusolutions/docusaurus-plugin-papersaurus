@@ -156,7 +156,7 @@ export default function (
     async postBuild(props) {
       let forceBuild = process.env.BUILD_PDF || "";
       if ((pluginOptions.autoBuildPdfs && !forceBuild.startsWith("0")) || forceBuild.startsWith("1")) {
-        await generatePdfFiles(_context.outDir, pluginOptions, props);
+        await generatePdfFiles(_context.outDir, pluginOptions, props, _context.i18n.currentLocale);
       }
     },
 

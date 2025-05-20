@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    "target": "es2017",
+    "target": "es2018",
     "module": "commonjs",
-    "lib": ["es2017","es2019.array","dom"],
+    "lib": ["es2018","es2019.array","dom"],
     "declaration": true,
     "declarationMap": false,
     "types": ["node"],

@@ -6,6 +6,7 @@
  */
 
 export interface PluginOptions {
+  concurrency?: number;
   addDownloadButton?: boolean;
   autoBuildPdfs?: boolean;
   downloadButtonText?: string;
@@ -41,7 +42,8 @@ export type PageFunction = (
   siteConfig: any,
   pluginConfig: PapersaurusPluginOptions,
   pageTitle: string,
-  version: string
+  version: string,
+  language: string
 ) => string;
 
 export type FileNameFunction = (
@@ -52,7 +54,8 @@ export type FileNameFunction = (
   parentTitles: string[],
   parentIds: string[],
   version: string,
-  versionPath: string
+  versionPath: string,
+  language: string
 ) => string;
 
 export type UsePath = {

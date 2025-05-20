@@ -13,12 +13,16 @@ import { Props, LoadedPlugin } from '@docusaurus/types';
 import { LoadedContent, LoadedVersion, DocMetadata } from "@docusaurus/plugin-content-docs"
 import puppeteer = require('puppeteer');
 import toc = require('html-toc');
-const pdfMerge = require('easy-pdf-merge');
-const pdfParse = require('pdf-parse');
+import pdfParse from 'pdf-parse-new';
+import PQueue, { QueueAddOptions } from 'p-queue';
+
 const join = require('path').join;
 import express = require('express');
 import { AddressInfo } from 'net';
 import * as fs from 'fs-extra';
+import PDFMerger from 'pdf-merger-js';
+import PriorityQueue from 'p-queue/dist/priority-queue';
+
 const GithubSlugger = require('github-slugger');
 const cheerio = require('cheerio');
 
@@ -29,7 +33,10 @@ const pluginLogPrefix = '[papersaurus] ';
 export async function generatePdfFiles(
   outDir: string,
   pluginOptions: PapersaurusPluginOptions,
-  { siteConfig, plugins }: Props) {
+  { siteConfig, plugins }: Props,
+  language: string) {
+
+  const queue = new PQueue({concurrency: pluginOptions.concurrency ?? 1});
 
   console.log(`${pluginLogPrefix}Execute generatePdfFiles...`);
 
@@ -155,6 +162,8 @@ export async function generatePdfFiles(
 
         // Create all PDF files for this sidebar
         await createPdfFilesRecursive(
+          queue,
+          language,
           rootCategory, 
           [], 
           [], 
@@ -186,8 +195,13 @@ export async function generatePdfFiles(
 
   fs.writeFileSync(join(docusaurusBuildDir, 'pdfs.json'), JSON.stringify(linkToFile));
 
-  browser.close();
-  httpServer.close();
+  await queue.onIdle()
+  console.log("close browser")
+  await browser.close();
+
+  await new Promise((res)=>{
+      httpServer.close(res);
+  })
 
   console.log(`${pluginLogPrefix}generatePdfFiles finished!`);
 }
@@ -287,7 +301,9 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
   }
 }
 
-async function createPdfFilesRecursive(sideBarItem: any,
+async function createPdfFilesRecursive(queue: PQueue<PriorityQueue, QueueAddOptions>,
+  language: string,
+  sideBarItem: any,
   parentTitles: string[],
   parentIds: string[],
   version: LoadedVersion,
@@ -312,7 +328,9 @@ async function createPdfFilesRecursive(sideBarItem: any,
       const newParentIds = [...parentIds];
       newParentIds.push(sideBarItem.unversionedId);
       for (const categorySubItem of sideBarItem.items) {
-        const subDocs = await createPdfFilesRecursive(categorySubItem,
+        const subDocs = await createPdfFilesRecursive(queue,
+          language,
+          categorySubItem,
           newParentTitles,
           newParentIds,
           version,
@@ -337,7 +355,7 @@ async function createPdfFilesRecursive(sideBarItem: any,
       break;
   }
 
-  let pdfFilename = pluginOptions.getPdfFileName(siteConfig, pluginOptions, sideBarItem.label, sideBarItem.unversionedId, parentTitles, parentIds, version.versionName, version.path);
+  let pdfFilename = pluginOptions.getPdfFileName(siteConfig, pluginOptions, sideBarItem.label, sideBarItem.unversionedId, parentTitles, parentIds, version.versionName, version.path, language);
   pdfFilename = slugger.slug(pdfFilename);
 
   let documentTitle = sideBarItem.label || '';
@@ -351,16 +369,20 @@ async function createPdfFilesRecursive(sideBarItem: any,
   }
 
   if (articles.length > 0) {
-    await createPdfFromArticles(documentTitle,
-      productVersion || version.label,
-      pdfFilename,
-      articles,
-      pluginOptions,
-      siteConfig,
-      buildDir,
-      browser,
-      siteAddress);
-
+    queue.add(
+      async ()=> {
+          await createPdfFromArticles(language, 
+            documentTitle,
+            productVersion || version.label,
+            pdfFilename,
+            articles,
+            pluginOptions,
+            siteConfig,
+            buildDir,
+            browser,
+            siteAddress);
+      }
+    )
     sideBarItem.pdfFilename = `${pdfPath}/${pdfFilename}.pdf`;
   }
 
@@ -436,6 +458,7 @@ function readHtmlForItem(
 }
 
 async function createPdfFromArticles(
+  language: string,
   documentTitle: string,
   documentVersion: string,
   pdfName: string,
@@ -447,23 +470,19 @@ async function createPdfFromArticles(
   siteAddress: string
 ): Promise<void> {
 
-  console.log(`${pluginLogPrefix}Creating PDF ${buildDir}\\${pdfName}.pdf...`);
-
-  const titlePdfFile = join(buildDir, `${pdfName}.title.pdf`);
-  const contentRawPdfFile = join(buildDir, `${pdfName}.content.raw.pdf`);
   const contentHtmlFile = join(buildDir, `${pdfName}.content.html`);
-  const contentPdfFile = join(buildDir, `${pdfName}.content.pdf`);
   const finalPdfFile = join(buildDir, `${pdfName}.pdf`);
+
+  console.log(`${pluginLogPrefix}Creating PDF ${finalPdfFile}...`);
 
   const coverPage = await browser.newPage();
   await coverPage.setContent(
-    pluginOptions.getPdfCoverPage(siteConfig, pluginOptions, documentTitle, documentVersion),
+    pluginOptions.getPdfCoverPage(siteConfig, pluginOptions, documentTitle, documentVersion, language),
     {
       timeout: pluginOptions.puppeteerTimeout
     });
-  await coverPage.pdf({
+  const titlePdfFile = await coverPage.pdf({
     format: 'a4',
-    path: titlePdfFile,
     headerTemplate: pluginOptions.coverPageHeader,
     footerTemplate: pluginOptions.coverPageFooter,
     displayHeaderFooter: true,
@@ -473,7 +492,6 @@ async function createPdfFromArticles(
   });
   await coverPage.close();
 
-  const page = await browser.newPage();
 
   let stylePath = articleList[0].stylePath;
   let scriptPath = articleList[0].scriptPath;
@@ -589,7 +607,7 @@ async function createPdfFromArticles(
 
   let htmlContent = `
   <!DOCTYPE html>
-  <html lang="en">
+  <html lang="${language}">
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -602,62 +620,55 @@ async function createPdfFromArticles(
     </body>
   </html>`;
 
-  await generateContentPdf(contentRawPdfFile);
+  const page = await browser.newPage();
 
-  const dataBuffer = fs.readFileSync(contentRawPdfFile);
-  const parsedData = await pdfParse(dataBuffer);
+  const parsedData = await pdfParse(await generateContentPdf() as Buffer, { verbosityLevel: 0 });
 
   htmlContent = getPageWithFixedToc(pluginOptions.footerParser, tocLinksInfos, parsedData.text, htmlContent);
 
-  await generateContentPdf(contentPdfFile);
 
-  htmlContent = await page.content();
-  fs.writeFileSync(contentHtmlFile, htmlContent);
-
-  await page.close();
-
-  await mergeMultiplePDF([titlePdfFile, contentPdfFile], finalPdfFile);
-
-  fs.unlinkSync(titlePdfFile);
-  fs.unlinkSync(contentRawPdfFile);
-  fs.unlinkSync(contentPdfFile);
-  if (!pluginOptions.keepDebugHtmls) {
-    fs.unlinkSync(contentHtmlFile);
+  const contentPdfFile = await generateContentPdf();
+  if (pluginOptions.keepDebugHtmls) {
+    htmlContent = await page.content();
+    fs.writeFileSync(contentHtmlFile, htmlContent);
   }
 
-  async function generateContentPdf(targetFile: string) {
+  await page.close();
+  await mergeMultiplePDF([titlePdfFile, contentPdfFile], finalPdfFile);
+
+  async function generateContentPdf(): Promise<Uint8Array> {
     await page.goto(siteAddress);
     await page.setContent(htmlContent, {
       timeout: pluginOptions.puppeteerTimeout
     });
-    await page.pdf({
-      path: targetFile,
+    return await page.pdf({
       format: 'a4',
-      headerTemplate: pluginOptions.getPdfPageHeader(siteConfig, pluginOptions, documentTitle, documentVersion),
-      footerTemplate: pluginOptions.getPdfPageFooter(siteConfig, pluginOptions, documentTitle, documentVersion),
+      headerTemplate: pluginOptions.getPdfPageHeader(siteConfig, pluginOptions, documentTitle, documentVersion, language),
+      footerTemplate: pluginOptions.getPdfPageFooter(siteConfig, pluginOptions, documentTitle, documentVersion, language),
       displayHeaderFooter: true,
       printBackground: true,
       scale: 1,
       margin: pluginOptions.margins,
       timeout: pluginOptions.puppeteerTimeout
     });
-
   }
-}
 
-const mergeMultiplePDF = (pdfFiles: string[], name: string) => {
-  return new Promise((resolve, reject) => {
-    pdfMerge(pdfFiles, name, function (err: any) {
+  async function mergeMultiplePDF(pdfFiles: Uint8Array[], name: string): Promise<void> {
+    var merger = new PDFMerger();
 
-      if (err) {
-        console.log(err);
-        reject(err)
-      }
+    for(const file of pdfFiles) {
+      await merger.add(file);
+    }
 
-      resolve('')
+    // Set metadata
+    await merger.setMetadata({
+      author: pluginOptions.author,
+      title: documentTitle
     });
-  });
-};
+
+    await merger.save(name); //save under given name and reset the internal document
+  };
+}
 
 const escapeHeaderRegex = (header: string) => {
   return header
