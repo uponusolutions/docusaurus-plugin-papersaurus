@@ -410,7 +410,12 @@ function readHtmlForItem(
   let htmlFileContent: string = fs.readFileSync(htmlFilePath, { encoding: 'utf8' });
 
   const origin = (new URL(rootDocUrl)).origin;
-  stylePath = getStylesheetPathFromHTML(htmlFileContent, origin);
+
+  try {
+    stylePath = getStylesheetPathFromHTML(htmlFileContent, origin);
+  }
+  catch {
+  }
 
   try {
     scriptPath = getScriptPathFromHTML(htmlFileContent, origin);
