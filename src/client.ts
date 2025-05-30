@@ -5,7 +5,7 @@ import siteConfig from '@generated/docusaurus.config';
 
 if (ExecutionEnvironment.canUseDOM) {
     $(window).on('load', function () {
-        const pluginOptions: PapersaurusPluginOptions = (siteConfig.plugins || []).find(plugin => Array.isArray(plugin) && typeof plugin[0] === "string" && plugin[0].includes("@uponusolutions/docusaurus-plugin-papersaurus")) as any
+        const pluginOptions: PapersaurusPluginOptions = (siteConfig.plugins || []).find(plugin => Array.isArray(plugin) && typeof plugin[0] === "string" && plugin[0].includes("@uponu-solutions/docusaurus-plugin-papersaurus")) as any
 
         var pdfData: Record<string, Array<{
             type: string
