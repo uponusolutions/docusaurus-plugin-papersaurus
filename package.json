@@ -1,6 +1,6 @@
 {
   "name": "@uponu-solutions/docusaurus-plugin-papersaurus",
-  "version": "3.6.1",
+  "version": "3.6.2",
   "description": "Papersaurus plugin for Docusaurus (create PDF files). Fork from original Repo",
   "main": "lib/index.js",
   "scripts": {
@@ -22,9 +22,9 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@docusaurus/core": "^3.5.2",
-    "@docusaurus/module-type-aliases": "^3.5.2",
-    "@docusaurus/plugin-content-docs": "^3.5.2",
+    "@docusaurus/core": "^3.8.0",
+    "@docusaurus/module-type-aliases": "^3.8.0",
+    "@docusaurus/plugin-content-docs": "^3.8.0",
     "@types/jquery": "^3.5.32",
     "cheerio": "^1.0.0",
     "express": "^5.1.0",
@@ -40,7 +40,7 @@
     "puppeteer": "^24.9.0"
   },
   "devDependencies": {
-    "@docusaurus/types": "^3.5.2",
+    "@docusaurus/types": "^3.8.0",
     "@types/express": "^5.0.2",
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^22.15.27",
