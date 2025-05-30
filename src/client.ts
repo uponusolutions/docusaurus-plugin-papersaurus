@@ -5,7 +5,18 @@ import siteConfig from '@generated/docusaurus.config';
 
 if (ExecutionEnvironment.canUseDOM) {
     $(window).on('load', function () {
-        const pluginOptions: PapersaurusPluginOptions = (siteConfig.plugins || []).find(plugin => Array.isArray(plugin) && typeof plugin[0] === "string" && plugin[0].includes("@uponu-solutions/docusaurus-plugin-papersaurus")) as any
+        const plugin = (siteConfig.plugins || []).find(
+                    plugin => Array.isArray(plugin) && 
+                    typeof plugin[0] === "string" && 
+                    plugin[0].includes("@uponu-solutions/docusaurus-plugin-papersaurus")
+        )
+        
+        if(plugin == null || !Array.isArray(plugin)) {
+            console.error("couldn't find plugin config", siteConfig.plugins)
+            return
+        }
+
+        const pluginOptions = plugin[1] as PapersaurusPluginOptions
 
         var pdfData: Record<string, Array<{
             type: string
