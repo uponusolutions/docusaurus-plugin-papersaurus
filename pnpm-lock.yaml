@@ -17,6 +17,9 @@ importers:
       '@docusaurus/plugin-content-docs':
         specifier: ^3.5.2
         version: 3.8.0(@mdx-js/react@3.1.0(@types/react@19.1.6)(react@19.1.0))(acorn@8.14.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(typescript@5.8.3)
+      '@types/jquery':
+        specifier: ^3.5.32
+        version: 3.5.32
       cheerio:
         specifier: ^1.0.0
         version: 1.0.0
@@ -32,6 +35,9 @@ importers:
       html-toc:
         specifier: ^2.0.0
         version: 2.0.0
+      jquery:
+        specifier: ^3.7.1
+        version: 3.7.1
       net:
         specifier: ^1.0.2
         version: 1.0.2
@@ -1168,6 +1174,9 @@ packages:
   '@types/istanbul-reports@3.0.4':
     resolution: {integrity: sha512-pk2B1NWalF9toCRu6gjBzR69syFjP4Od8WRAX+0mmf9lAjCRicLOWc+ZrxZHx/0XRjotgkF9t6iaMJ+aXcOdZQ==}
 
+  '@types/jquery@3.5.32':
+    resolution: {integrity: sha512-b9Xbf4CkMqS02YH8zACqN1xzdxc3cO735Qe5AbSUFmyOiaWAbcpqh9Wna+Uk0vgACvoQHpWDg2rGdHkYPLmCiQ==}
+
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
@@ -1224,6 +1233,9 @@ packages:
 
   '@types/serve-static@1.15.7':
     resolution: {integrity: sha512-W8Ym+h8nhuRwaKPaDw34QUkwsGi6Rc4yYqvKFo5rm2FUEhCFbzVWrxXUxuKK8TASjWsysJY0nsmNCGhCOIsrOw==}
+
+  '@types/sizzle@2.3.9':
+    resolution: {integrity: sha512-xzLEyKB50yqCUPUJkIsrVvoWNfFUbIZI+RspLWt8u+tIW/BetMBZtgV2LY/2o+tYH8dRvQ+eoPf3NdhQCcLE2w==}
 
   '@types/sockjs@0.3.36':
     resolution: {integrity: sha512-MK9V6NzAS1+Ud7JV9lJLFqW85VbC9dq3LmwZCuBe4wBDgKC0Kj/jd8Xl+nSviU+Qc3+m7umHHyHg//2KSa0a0Q==}
@@ -2872,6 +2884,9 @@ packages:
 
   joi@17.13.3:
     resolution: {integrity: sha512-otDA4ldcIx+ZXsKHWmp0YizCweVRZG96J10b0FevjfuncLO1oX59THoAmHkNubYJ+9gWsYsp5k8v4ib6oDv1fA==}
+
+  jquery@3.7.1:
+    resolution: {integrity: sha512-m4avr8yL8kmFN8psrbFFFmB/If14iN5o9nw/NgnnM+kybDJpRsAynV2BsfpTYrTRysYUdADVD7CkUUizgkpLfg==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -6572,6 +6587,10 @@ snapshots:
     dependencies:
       '@types/istanbul-lib-report': 3.0.3
 
+  '@types/jquery@3.5.32':
+    dependencies:
+      '@types/sizzle': 2.3.9
+
   '@types/json-schema@7.0.15': {}
 
   '@types/jsonfile@6.1.4':
@@ -6639,6 +6658,8 @@ snapshots:
       '@types/http-errors': 2.0.4
       '@types/node': 22.15.27
       '@types/send': 0.17.4
+
+  '@types/sizzle@2.3.9': {}
 
   '@types/sockjs@0.3.36':
     dependencies:
@@ -8519,6 +8540,8 @@ snapshots:
       '@sideway/address': 4.1.5
       '@sideway/formula': 3.0.1
       '@sideway/pinpoint': 2.0.0
+
+  jquery@3.7.1: {}
 
   js-tokens@4.0.0: {}
 

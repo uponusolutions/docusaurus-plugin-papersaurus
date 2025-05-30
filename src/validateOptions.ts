@@ -1,5 +1,7 @@
 import { Joi } from "@docusaurus/utils-validation";
 import { PluginOptions, PapersaurusPluginOptions, PageFunction, FileNameFunction, Margins, UsePath } from "./types";
+import os from 'os';
+
 const he = require('he');
 
 const isStringOrArrayOfStrings = Joi.alternatives().try(
@@ -104,7 +106,7 @@ const schema = Joi.object<PapersaurusPluginOptions>({
   author: Joi.string().default("").allow(""),
   footerParser: Joi.object<RegExp>().instance(RegExp),
   keepDebugHtmls: Joi.boolean().default(false),
-  concurrency: Joi.number().default(1),
+  concurrency: Joi.number().default(os.cpus().length),
   puppeteerTimeout: Joi.number().default(30000),
   sidebarNames: isStringOrArrayOfStrings.default([]),
   versions: isStringOrArrayOfStrings.default([]),
@@ -116,7 +118,6 @@ const schema = Joi.object<PapersaurusPluginOptions>({
     localPath: Joi.string().required(),
   })).default([]),
   ignoreCssSelectors: isStringOrArrayOfStrings.default([]),
-  jQueryUrl: Joi.string().allow('').default("https://code.jquery.com/jquery-3.6.0.min.js"),
   getPdfFileName: Joi.func().default(() => defaultPdfFileNameFunction),
 });
 

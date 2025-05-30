@@ -12,6 +12,7 @@ import {
 import { Props, LoadedPlugin } from '@docusaurus/types';
 import { LoadedContent, LoadedVersion, DocMetadata } from "@docusaurus/plugin-content-docs"
 import puppeteer = require('puppeteer');
+// @ts-expect-error no types
 import toc = require('html-toc');
 import pdfParse from 'pdf-parse-new';
 import PQueue, { QueueAddOptions } from 'p-queue';

@@ -32,7 +32,6 @@ export interface PluginOptions {
   productTitles?: string[];
   useExtraPaths?: UsePath[];
   ignoreCssSelectors?: string[];
-  jQueryUrl?: string;
   getPdfFileName?: FileNameFunction;
 }
 
