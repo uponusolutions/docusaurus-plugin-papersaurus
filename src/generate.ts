@@ -21,7 +21,7 @@ const join = require('path').join;
 import express = require('express');
 import { AddressInfo } from 'net';
 import * as fs from 'fs-extra';
-import PDFMerger from 'pdf-merger-js';
+import { PDFDocument } from 'pdf-lib';
 import PriorityQueue from 'p-queue/dist/priority-queue';
 
 const GithubSlugger = require('github-slugger');
@@ -659,20 +659,26 @@ async function createPdfFromArticles(
     });
   }
 
+  // Merges the given PDFs (in order) into a single file. The last PDF is used
+  // as the base document and the others are inserted in front, so its internal
+  // links (e.g. the TOC jump targets) stay intact.
   async function mergeMultiplePDF(pdfFiles: Uint8Array[], name: string): Promise<void> {
-    var merger = new PDFMerger();
-
-    for(const file of pdfFiles) {
-      await merger.add(file);
+    if (pdfFiles.length === 0) {
+      throw new Error('mergeMultiplePDF called with no PDF files');
     }
 
-    // Set metadata
-    await merger.setMetadata({
-      author: pluginOptions.author,
-      title: documentTitle
-    });
-
-    await merger.save(name); //save under given name and reset the internal document
+    const baseDoc = await PDFDocument.load(pdfFiles[pdfFiles.length - 1]);
+    let insertAt = 0;
+    for (let i = 0; i < pdfFiles.length - 1; i++) {
+      const frontDoc = await PDFDocument.load(pdfFiles[i]);
+      const copied = await baseDoc.copyPages(frontDoc, frontDoc.getPageIndices());
+      for (const p of copied) {
+        baseDoc.insertPage(insertAt++, p);
+      }
+    }
+    baseDoc.setAuthor(pluginOptions.author);
+    baseDoc.setTitle(documentTitle);
+    await fs.writeFile(name, await baseDoc.save());
   };
 }
 
