@@ -17,6 +17,9 @@ importers:
       '@docusaurus/plugin-content-docs':
         specifier: ^3.8.0
         version: 3.8.0(@mdx-js/react@3.1.0(@types/react@19.1.6)(react@19.1.0))(acorn@8.14.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(typescript@5.8.3)
+      '@docusaurus/utils-validation':
+        specifier: ^3.8.0
+        version: 3.8.0(acorn@8.14.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       '@types/jquery':
         specifier: ^3.5.32
         version: 3.5.32
