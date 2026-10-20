@@ -47,6 +47,12 @@ export interface PluginOptions {
    * including the site root. false = off.
    */
   completePdf?: false | CompletePdfOptions;
+  /**
+   * Structure the PDFs like the sidebar: every page sits at its sidebar depth (headings shift down
+   * accordingly), categories without a page get a heading, page titles drop the parent titles in
+   * front, and the TOC and the bookmarks nest along the sidebar. false keeps one flat level per page.
+   */
+  structureBySidebar?: boolean;
 }
 
 /** A plain string, or a map from locale (e.g. "en", "de") to the string for that locale. */

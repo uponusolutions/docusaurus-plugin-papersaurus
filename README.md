@@ -107,6 +107,22 @@ Generates one additional PDF over all sidebars and offers it as the "complete ve
 
 Default: `false`
 
+### structureBySidebar
+
+Structures the PDFs like the sidebar instead of giving every page its own top level:
+
+- every page sits at its sidebar depth; its headings move down accordingly (the h1 of a page two
+  levels deep becomes an h3, capped at h6)
+- categories without a page of their own get a heading with their label
+- page titles no longer carry their parent titles in front ("Admin / Gateway / Key Management")
+- the TOC nests along the sidebar (page titles plus their h2 and h3), and so do the PDF bookmarks
+- only top-level headings (h1) start a new page, so the PDFs get considerably shorter
+
+Style the shifted headings with your print CSS; the lower levels (h4-h6) should not get smaller than
+the body text.
+
+Default: `false`
+
 ### sidebarNames
 
 The plugin is using your `sidebars.js` file to find the sections and documents. Since the file can contain multiple sidebars, add the name(s) of the sidebar(s) that should be used to generate files. If none is specified all will be used.

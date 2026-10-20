@@ -38,6 +38,12 @@ type LinkEntry = { label: string, file: string, type: 'root' | 'section' | 'chap
 /** Queues one PDF render; `file` names the PDF in log and error messages. */
 type EnqueueFn = (file: string, task: () => Promise<void>) => void;
 
+/**
+ * One part of a PDF: a page (`item`) or, with structureBySidebar, the heading of a category without
+ * a page (`heading`). `depth` is the sidebar depth relative to the PDF's root (0 = top level).
+ */
+type ArticleRef = { item?: any, heading?: string, depth: number };
+
 export async function generatePdfFiles(
   outDir: string,
   pluginOptions: PapersaurusPluginOptions,
@@ -107,7 +113,19 @@ export async function generatePdfFiles(
   const tasks: Promise<void>[] = [];
   const failures: string[] = [];
   const enqueue: EnqueueFn = (file, task) => {
-    tasks.push(queue.add(task).then(() => undefined, (err: unknown) => {
+    // A render can stall when the machine is busy (Chrome stops answering), so retry once before
+    // failing the build
+    const taskWithRetry = async () => {
+      try {
+        await task();
+      }
+      catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`${pluginLogPrefix}Retrying ${file} after: ${message}`);
+        await task();
+      }
+    };
+    tasks.push(queue.add(taskWithRetry).then(() => undefined, (err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`${pluginLogPrefix}Failed to create ${file}: ${message}`);
       failures.push(`${file}: ${message}`);
@@ -143,7 +161,7 @@ export async function generatePdfFiles(
       }
 
       // Articles of all sidebars (for the complete PDF) and the root category of each sidebar
-      const allArticles: any[] = [];
+      const allArticles: ArticleRef[] = [];
       const sidebarRoots: any[] = [];
 
       // Loop through all configured sidebar names
@@ -185,7 +203,7 @@ export async function generatePdfFiles(
           };
 
           // Browse through all documents of this sidebar
-          pickHtmlArticlesRecursive(rootCategory, [], versionInfo, `${siteAddress}docs/`, docusaurusBuildDir, siteConfig);
+          pickHtmlArticlesRecursive(rootCategory, [], versionInfo, `${siteAddress}docs/`, docusaurusBuildDir, siteConfig, !pluginOptions.structureBySidebar);
 
           // Create all PDF files for this sidebar
           const sidebarArticles = await createPdfFilesRecursive(
@@ -319,7 +337,8 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
   version: LoadedVersion,
   rootDocUrl: string,
   htmlDir: string,
-  siteConfig: any) {
+  siteConfig: any,
+  prefixParentTitles: boolean) {
   switch (sideBarItem.type) {
     case 'category': {
       const hasDocLink = sideBarItem.link && sideBarItem.link.type == 'doc';
@@ -334,7 +353,7 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
             break;
           }
         }
-        readHtmlForItem(sideBarItem, parentTitles, rootDocUrl, path, version, siteConfig);
+        readHtmlForItem(sideBarItem, parentTitles, rootDocUrl, path, version, siteConfig, prefixParentTitles);
       }
       else {
         console.log("a", sideBarItem.label)
@@ -344,7 +363,7 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
       const newParentTitles = [...parentTitles];
       newParentTitles.push(sideBarItem.label);
       for (const categorySubItem of sideBarItem.items) {
-        pickHtmlArticlesRecursive(categorySubItem, newParentTitles, version, rootDocUrl, htmlDir, siteConfig);
+        pickHtmlArticlesRecursive(categorySubItem, newParentTitles, version, rootDocUrl, htmlDir, siteConfig, prefixParentTitles);
         if (!hasDocLink && !sideBarItem.stylePath) {
           sideBarItem.stylePath = categorySubItem.stylePath;
           sideBarItem.scriptPath = categorySubItem.scriptPath;
@@ -364,7 +383,7 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
           break;
         }
       }
-      readHtmlForItem(sideBarItem, parentTitles, rootDocUrl, path, version, siteConfig);
+      readHtmlForItem(sideBarItem, parentTitles, rootDocUrl, path, version, siteConfig, prefixParentTitles);
       break;
     }
     default:
@@ -386,13 +405,17 @@ async function createPdfFilesRecursive(enqueue: EnqueueFn,
   siteAddress: string,
   productTitle: string,
   productVersion: string
-): Promise<any[]> {
+): Promise<ArticleRef[]> {
 
-  let articles: any[] = [];
+  // The parts of this item, depth relative to this item
+  let articles: ArticleRef[] = [];
   switch (sideBarItem.type) {
     case 'category': {
       if (sideBarItem.permalink) {
-        articles.push(sideBarItem);
+        articles.push({ item: sideBarItem, depth: 0 });
+      }
+      else if (pluginOptions.structureBySidebar) {
+        articles.push({ heading: sideBarItem.label || '', depth: 0 });
       }
       const newParentTitles = [...parentTitles];
       newParentTitles.push(sideBarItem.label);
@@ -414,12 +437,12 @@ async function createPdfFilesRecursive(enqueue: EnqueueFn,
           productTitle,
           productVersion
         );
-        articles.push(...subDocs);
+        articles.push(...subDocs.map((ref) => ({ ...ref, depth: ref.depth + 1 })));
       }
       break;
     }
     case 'doc': {
-      articles.push(sideBarItem);
+      articles.push({ item: sideBarItem, depth: 0 });
       break;
     }
     default:
@@ -439,13 +462,20 @@ async function createPdfFilesRecursive(enqueue: EnqueueFn,
     documentTitle = productTitle + ' / ' + documentTitle;
   }
 
-  if (articles.length > 0) {
+  // In this item's own PDF the cover names a category without a page, so its heading is left out
+  // and everything below moves up one level
+  let pdfArticles = articles;
+  if (articles.length > 0 && articles[0].heading !== undefined) {
+    pdfArticles = articles.slice(1).map((ref) => ({ ...ref, depth: ref.depth - 1 }));
+  }
+
+  if (pdfArticles.some((ref) => ref.item)) {
     enqueue(`${pdfPath}/${pdfFilename}.pdf`, () => createPdfFromArticles(
       language,
       documentTitle,
       productVersion || version.label,
       pdfFilename,
-      articles,
+      pdfArticles,
       pluginOptions,
       siteConfig,
       buildDir,
@@ -464,7 +494,8 @@ function readHtmlForItem(
   rootDocUrl: string,
   htmlDir: string,
   version: LoadedVersion,
-  siteConfig: any) {
+  siteConfig: any,
+  prefixParentTitles: boolean) {
 
   let htmlFilePath = htmlDir;
   htmlFilePath = join(htmlFilePath, 'index.html');
@@ -514,7 +545,7 @@ function readHtmlForItem(
 
     // Add parent titles in front of existing title in h1 tag
     let newTitle = item.pageTitle;
-    if (parentTitles.length > 1) {
+    if (prefixParentTitles && parentTitles.length > 1) {
       newTitle = parentTitles.slice(1).join(' / ') + ' / ' + item.pageTitle;
     }
     const newH1Tag = h1Tag.substring(0, h1Tag.indexOf('>') + 1) + newTitle + h1Tag.substring(h1Tag.indexOf('</h1>'));
@@ -536,7 +567,7 @@ async function createPdfFromArticles(
   documentTitle: string,
   documentVersion: string,
   pdfName: string,
-  articleList: any[],
+  articleList: ArticleRef[],
   pluginOptions: PapersaurusPluginOptions,
   siteConfig: any,
   buildDir: string,
@@ -572,16 +603,24 @@ async function createPdfFromArticles(
   }
 
 
-  let stylePath = articleList[0].stylePath;
-  let scriptPath = articleList[0].scriptPath;
+  const structured = pluginOptions.structureBySidebar;
+  const pages = articleList.filter((ref) => ref.item).map((ref) => ref.item);
+  let stylePath = pages[0].stylePath;
+  let scriptPath = pages[0].scriptPath;
 
   let fullHtml = '';
   for (const article of articleList) {
-    if (articleList.length > 1 && pluginOptions.ignoreDocs.includes(article.unversionedId || '-IdIsEmpty-')) {
-      // Don't add ignored articles to PDF's with multiple articles (section pdf's, complete document pdf)
-      continue;
+    if (article.item) {
+      if (pages.length > 1 && pluginOptions.ignoreDocs.includes(article.item.unversionedId || '-IdIsEmpty-')) {
+        // Don't add ignored articles to PDF's with multiple articles (section pdf's, complete document pdf)
+        continue;
+      }
+      fullHtml += structured ? nestHeadings(article.item.articleHtml || '', article.depth) : (article.item.articleHtml || '');
     }
-    fullHtml += article.articleHtml || '';
+    else if (structured && article.heading) {
+      const tag = `h${Math.min(6, article.depth + 1)}`;
+      fullHtml += `<${tag} data-toc-level="${article.depth}">${escapeHtml(article.heading)}</${tag}>`;
+    }
   }
 
   // Remove header tags (around h1)
@@ -602,27 +641,48 @@ async function createPdfFromArticles(
   $(".theme-doc-toc-mobile").remove();
   $(".buttonGroup__atx").remove();
 
-  fullHtml = $.html();
+  let htmlToc: string;
+  let htmlArticles: string;
 
-  // Add table of contents
-  fullHtml = toc('<div id="toc"></div>' + fullHtml, {
-    anchorTemplate: function (id: string) {
-      return `<a class="toc-target" href="${id}" id="${id}"></a>`;
-    },
-    selectors: 'h1,h2,h3',
-    parentLink: false,
-    header: '<h1 class="ignoreCounter">Contents</h1>',
-    minLength: 0,
-    addId: false //=default
-  });
+  if (structured) {
+    // Table of contents along the logical levels (sidebar depth + heading level), which nest
+    // deeper than the h1-h6 tags can
+    const entries: TocEntry[] = [];
+    $('[data-toc-level]').each((_i: number, el: any) => {
+      const text = $(el).text().replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\s+/g, ' ').trim();
+      if (!text) {
+        return;
+      }
+      const id = `papersaurus-toc-${entries.length + 1}`;
+      $(el).append(`<a class="toc-target" id="${id}"></a>`);
+      entries.push({ level: Number($(el).attr('data-toc-level')), id, text });
+    });
+    htmlArticles = $.html();
+    htmlToc = '<h1 class="ignoreCounter">Contents</h1>' + buildNestedToc(entries);
+  }
+  else {
+    fullHtml = $.html();
 
-  let htmlToc = fullHtml.substring(14, fullHtml.indexOf('</div>'));
+    // Add table of contents
+    fullHtml = toc('<div id="toc"></div>' + fullHtml, {
+      anchorTemplate: function (id: string) {
+        return `<a class="toc-target" href="${id}" id="${id}"></a>`;
+      },
+      selectors: 'h1,h2,h3',
+      parentLink: false,
+      header: '<h1 class="ignoreCounter">Contents</h1>',
+      minLength: 0,
+      addId: false //=default
+    });
 
-  htmlToc = htmlToc.replace(/class="nav sidenav"/g, 'class="toc-headings"');
-  htmlToc = htmlToc.replace(/class="nav"/g, 'class="toc-headings"');
-  htmlToc = htmlToc.replace(/[\r\n]+/g, '');
+    htmlToc = fullHtml.substring(14, fullHtml.indexOf('</div>'));
 
-  const htmlArticles = fullHtml.substring(fullHtml.indexOf('</div>') + 6);
+    htmlToc = htmlToc.replace(/class="nav sidenav"/g, 'class="toc-headings"');
+    htmlToc = htmlToc.replace(/class="nav"/g, 'class="toc-headings"');
+    htmlToc = htmlToc.replace(/[\r\n]+/g, '');
+
+    htmlArticles = fullHtml.substring(fullHtml.indexOf('</div>') + 6);
+  }
   const tocLinks = htmlToc.match(/<a href="#[^<>]+">[^<>]+<\/a>/g);
   let tocLinksInfos = tocLinks?.map((link) => {
     const entry: TocInfo = {
@@ -786,6 +846,56 @@ async function createPdfFromArticles(
     await fs.writeFile(name, await baseDoc.save());
   };
 }
+
+type TocEntry = { level: number, id: string, text: string };
+
+const escapeHtml = (text: string) => text
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
+/**
+ * Moves the headings of a page down by its sidebar depth (h1 of a page at depth 2 becomes h3, capped
+ * at h6) and marks the page's h1-h3 for the table of contents with their logical level.
+ */
+const nestHeadings = (html: string, depth: number) => {
+  const $ = cheerio.load(html, null, false);
+  $('h1, h2, h3, h4, h5, h6').each((_i: number, el: any) => {
+    const level = Number(el.name.substring(1));
+    el.name = `h${Math.min(6, level + depth)}`;
+    if (level <= 3) {
+      $(el).attr('data-toc-level', String(level - 1 + depth));
+    }
+  });
+  return $.html();
+};
+
+/** Builds nested `ul.toc-headings` lists from entries in document order. */
+const buildNestedToc = (entries: TocEntry[]) => {
+  let html = '';
+  const levels: number[] = [];
+  for (const entry of entries) {
+    if (levels.length === 0 || entry.level > levels[levels.length - 1]) {
+      // first entry, or deeper than the previous one: open a list inside the open item
+      html += '<ul class="toc-headings">';
+      levels.push(entry.level);
+    }
+    else {
+      while (levels.length > 1 && entry.level < levels[levels.length - 1]) {
+        html += '</li></ul>';
+        levels.pop();
+      }
+      html += '</li>';
+    }
+    html += `<li><a href="#${entry.id}">${escapeHtml(entry.text)}</a>`;
+  }
+  while (levels.length > 0) {
+    html += '</li></ul>';
+    levels.pop();
+  }
+  return html;
+};
 
 const escapeHeaderRegex = (header: string) => {
   return header

@@ -133,6 +133,7 @@ const schema = Joi.object<PapersaurusPluginOptions>({
       fileName: Joi.string(),
     })
   ).default(false),
+  structureBySidebar: Joi.boolean().default(false),
 });
 
 type ValidateFn = (
@@ -163,6 +164,9 @@ export function processOptions(
   }
   if (!pluginOptions.completePdf) {
     pluginOptions.completePdf = false;
+  }
+  if (!pluginOptions.structureBySidebar) {
+    pluginOptions.structureBySidebar = false;
   }
   if (!pluginOptions.concurrency) {
     pluginOptions.concurrency = Math.max(1, Math.min(4, os.cpus().length));
