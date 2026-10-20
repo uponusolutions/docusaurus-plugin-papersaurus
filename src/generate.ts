@@ -24,7 +24,9 @@ import * as fs from 'fs-extra';
 import { PDFDocument } from 'pdf-lib';
 import { resolveLocalized } from './i18n';
 
-const GithubSlugger = require('github-slugger');
+// github-slugger 2 is ESM-only: plain require() returns the namespace, Docusaurus' loader the class
+const githubSluggerModule = require('github-slugger');
+const GithubSlugger = githubSluggerModule.default ?? githubSluggerModule;
 const cheerio = require('cheerio');
 
 let slugger = new GithubSlugger();

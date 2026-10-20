@@ -31,6 +31,7 @@
     "express": "^5.1.0",
     "fs-extra": "^11.3.0",
     "github-slugger": "^2.0.0",
+    "he": "^1.2.0",
     "html-toc": "^2.0.0",
     "jquery": "^3.7.1",
     "net": "^1.0.2",
