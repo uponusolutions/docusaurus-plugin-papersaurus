@@ -18,7 +18,7 @@ It uses  [Puppeteer](https://pptr.dev/) to convert html pages to PDF.
 
 1. Puppeteer does not yet support individual headers / footers for the cover page. Therefore this plugin generates a PDF with just uses [easy-pdf-merge](https://www.npmjs.com/package/easy-pdf-merge) See [this SO question](https://stackoverflow.com/questions/55470714/trying-to-hide-first-footer-header-on-pdf-generated-with-puppeteer)
 
-2. Puppeteer does not yet support the generation of TOCs. See [this feature request](https://github.com/puppeteer/puppeteer/issues/1778) and [this Chromium bug](https://bugs.chromium.org/p/chromium/issues/detail?id=840455). Therefore this package renders the content once on its own, reads the page of every heading from that PDF, renders the TOC alone to learn how many pages it takes, and then renders TOC and content together with the final page numbers. The TOC entries are links, and the PDF carries an outline (bookmarks) built from the headings.
+2. Puppeteer does not yet support the generation of TOCs. See [this feature request](https://github.com/puppeteer/puppeteer/issues/1778) and [this Chromium bug](https://bugs.chromium.org/p/chromium/issues/detail?id=840455). Therefore this package renders TOC and content once with placeholder page numbers, reads the page of every heading from that PDF, and renders the document again with the real page numbers. The TOC entries are links, and the PDF carries an outline (bookmarks) built from the headings.
 
 ## Installation
 
@@ -291,7 +291,7 @@ The value may be used in `getPdfCoverPage`, `getPdfPageHeader` or `getPdfPageFoo
 
 ### footerParser
 
-Deprecated and ignored since 3.6.5. The TOC page numbers are computed from a content-only render, so no footer text has to be parsed any more. The option is still accepted so existing configurations keep validating.
+Deprecated and ignored since 3.6.5. The TOC page numbers are read from a render of the final layout, so no footer text has to be parsed any more. The option is still accepted so existing configurations keep validating.
 
 ### coverMargins
 

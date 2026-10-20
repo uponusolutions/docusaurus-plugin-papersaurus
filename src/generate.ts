@@ -725,22 +725,15 @@ async function createPdfFromArticles(
   const page = await browser.newPage();
   let contentPdfFile: Uint8Array;
   try {
-    // Pass A: content only, to find the page of every TOC entry within the content.
-    const articlesPdf = await renderPdf(wrapHtml(htmlArticles), false);
-    const contentPages = getTocContentPages(tocLinksInfos, await getPdfPageTexts(articlesPdf));
+    // Measuring pass: the final layout (TOC + content) with placeholder page numbers. The page
+    // of every heading in it is its final page number, because the numbers only change the width
+    // of the TOC lines, not their count. Measuring the final layout directly avoids guessing how
+    // many pages the TOC takes or whether a partial document starts with an empty page.
+    const measureHtml = wrapHtml(fillTocPageNumbers(htmlToc, tocLinksInfos.map(() => 888)) + htmlArticles);
+    const pageNumbers = getTocContentPages(tocLinksInfos, await getPdfPageTexts(await renderPdf(measureHtml, false)));
 
-    // Pass B: TOC only (with realistic numbers), to learn how many pages the TOC takes. The
-    // content starts on a fresh page after it because every h1 breaks the page.
-    const tocPdf = await renderPdf(wrapHtml(fillTocPageNumbers(htmlToc, contentPages)), false);
-    const tocPageCount = (await PDFDocument.load(tocPdf)).getPageCount();
-
-    // Final pass: TOC + content with the real numbers, plus the PDF outline (bookmarks).
-    // A content-only render may start with an empty page (the first h1 forces a page break),
-    // while in the final document the content starts right after the TOC. The first TOC entry is
-    // the first heading of the content, so its page marks where the content starts.
-    const firstContentPage = contentPages.length > 0 ? contentPages[0] : 1;
-    const finalPageNumbers = contentPages.map((n) => n - firstContentPage + 1 + tocPageCount);
-    const finalHtml = wrapHtml(fillTocPageNumbers(htmlToc, finalPageNumbers) + htmlArticles);
+    // Final pass: the real numbers, plus the PDF outline (bookmarks).
+    const finalHtml = wrapHtml(fillTocPageNumbers(htmlToc, pageNumbers) + htmlArticles);
     contentPdfFile = await renderPdf(finalHtml, true);
 
     if (pluginOptions.keepDebugHtmls) {
