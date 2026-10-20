@@ -15,14 +15,14 @@ import puppeteer = require('puppeteer');
 // @ts-expect-error no types
 import toc = require('html-toc');
 import pdfParse from 'pdf-parse-new';
-import PQueue, { QueueAddOptions } from 'p-queue';
+import PQueue from 'p-queue';
 
 const join = require('path').join;
 import express = require('express');
 import { AddressInfo } from 'net';
 import * as fs from 'fs-extra';
 import { PDFDocument } from 'pdf-lib';
-import PriorityQueue from 'p-queue/dist/priority-queue';
+import { resolveLocalized } from './i18n';
 
 const GithubSlugger = require('github-slugger');
 const cheerio = require('cheerio');
@@ -30,6 +30,11 @@ const cheerio = require('cheerio');
 let slugger = new GithubSlugger();
 
 const pluginLogPrefix = '[papersaurus] ';
+
+type LinkEntry = { label: string, file: string, type: 'root' | 'section' | 'chapter' };
+
+/** Queues one PDF render; `file` names the PDF in log and error messages. */
+type EnqueueFn = (file: string, task: () => Promise<void>) => void;
 
 export async function generatePdfFiles(
   outDir: string,
@@ -93,116 +98,178 @@ export async function generatePdfFiles(
   // Start a puppeteer browser
   const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security'] });
 
-  const linkToFile: { [key: string]: { label: string, file: string, type: 'root' | 'section' | 'chapter' }[] } = {};
+  const linkToFile: { [key: string]: LinkEntry[] } = {};
 
-  // Loop through all found versions
-  for (const versionInfo of (docPlugin.content as LoadedContent).loadedVersions) {
-    if (pluginOptions.versions.length != 0 && !pluginOptions.versions.includes(versionInfo.versionName)) {
-      // Skip this version as it was not specified in versions option.
-      continue;
-    }
+  // Every render runs in the queue. Failures are collected, so the build fails with the names of
+  // the PDFs that could not be created instead of an unhandled rejection.
+  const tasks: Promise<void>[] = [];
+  const failures: string[] = [];
+  const enqueue: EnqueueFn = (file, task) => {
+    tasks.push(queue.add(task).then(() => undefined, (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`${pluginLogPrefix}Failed to create ${file}: ${message}`);
+      failures.push(`${file}: ${message}`);
+    }));
+  };
 
-    console.log(`${pluginLogPrefix}Processing version '${versionInfo.label}'`);
+  try {
+    const loadedVersions = (docPlugin.content as LoadedContent).loadedVersions;
 
-    if (pluginOptions.sidebarNames.length == 0) {
-      // No sidebar specified, use all of them.
-      let allSidebarNames: string[] = [];
-      for (const name in versionInfo.sidebars) {
-        allSidebarNames.push(name);
-      }
-      pluginOptions.sidebarNames = allSidebarNames;
-    }
-    // Loop through all configured sidebar names
-    for (const [i, sidebarName] of pluginOptions.sidebarNames.entries()) {
-
-      slugger = new GithubSlugger();
-      let folderName = '';
-      let productTitle = '';
-
-      if (pluginOptions.productTitles && pluginOptions.productTitles.length > i) {
-        productTitle = pluginOptions.productTitles[i];
+    // Loop through all found versions
+    for (const versionInfo of loadedVersions) {
+      if (pluginOptions.versions.length != 0 && !pluginOptions.versions.includes(versionInfo.versionName)) {
+        // Skip this version as it was not specified in versions option.
+        continue;
       }
 
-      if (pluginOptions.subfolders && pluginOptions.subfolders.length > i) {
-        folderName = pluginOptions.subfolders[i];
-      }
+      console.log(`${pluginLogPrefix}Processing version '${versionInfo.label}'`);
 
-      // Create build folder for that version
-      let versionPath = getVersionPath(versionInfo, siteConfig);
-      const versionPdfPath = [pdfPath, versionPath, folderName].filter(str => str != "").join("/");
-      const versionBuildDir = join(pdfBuildDir, versionPath, folderName);
-      fs.ensureDirSync(versionBuildDir);
-
-      console.log(`${pluginLogPrefix}Start processing sidebar named '${sidebarName}' in version '${versionInfo.label}'`);
-
-      let sidebar = versionInfo.sidebars[sidebarName];
-      if (sidebar) {
-        let projectName = siteConfig.projectName;
-        if (!projectName) {
-          console.log(`${pluginLogPrefix}Docusaurus projectName not set, using placeholder...`);
-          projectName = 'Unnamed project';
+      if (pluginOptions.sidebarNames.length == 0) {
+        // No sidebar specified, use all of them.
+        let allSidebarNames: string[] = [];
+        for (const name in versionInfo.sidebars) {
+          allSidebarNames.push(name);
         }
-        // Create a fake category with root of sidebar
-        const rootCategory: any = {
-          type: 'category',
-          label: projectName,
-          unversionedId: projectName,
-          items: sidebar,
-          collapsed: true,
-          collapsible: true
-        };
+        pluginOptions.sidebarNames = allSidebarNames;
+      }
 
-        // Browse through all documents of this sidebar
-        pickHtmlArticlesRecursive(rootCategory, [], versionInfo, `${siteAddress}docs/`, docusaurusBuildDir, siteConfig);
+      const versionPath = getVersionPath(versionInfo, siteConfig);
 
-        let productVersion = "";
+      let productVersion = "";
+      if (loadedVersions.length === 1) {
+        productVersion = pluginOptions.productVersion;
+      }
 
-        if ((docPlugin.content as LoadedContent).loadedVersions.length === 1){
-          productVersion = pluginOptions.productVersion;
+      // Articles of all sidebars (for the complete PDF) and the root category of each sidebar
+      const allArticles: any[] = [];
+      const sidebarRoots: any[] = [];
+
+      // Loop through all configured sidebar names
+      for (const [i, sidebarName] of pluginOptions.sidebarNames.entries()) {
+
+        slugger = new GithubSlugger();
+        let folderName = '';
+        let productTitle = '';
+
+        if (pluginOptions.productTitles && pluginOptions.productTitles.length > i) {
+          productTitle = pluginOptions.productTitles[i];
         }
 
-        // Create all PDF files for this sidebar
-        await createPdfFilesRecursive(
-          queue,
+        if (pluginOptions.subfolders && pluginOptions.subfolders.length > i) {
+          folderName = pluginOptions.subfolders[i];
+        }
+
+        // Create build folder for that version
+        const versionPdfPath = [pdfPath, versionPath, folderName].filter(str => str != "").join("/");
+        const versionBuildDir = join(pdfBuildDir, versionPath, folderName);
+        fs.ensureDirSync(versionBuildDir);
+
+        console.log(`${pluginLogPrefix}Start processing sidebar named '${sidebarName}' in version '${versionInfo.label}'`);
+
+        let sidebar = versionInfo.sidebars[sidebarName];
+        if (sidebar) {
+          // The root title names the sidebar's PDF; the language-neutral id keeps its file name
+          // stable across locales and apart from the sidebar's own index doc.
+          const rootTitle = resolveLocalized(pluginOptions.sidebarTitles[sidebarName], language) ?? sidebarName;
+
+          // Create a fake category with root of sidebar
+          const rootCategory: any = {
+            type: 'category',
+            label: rootTitle,
+            unversionedId: `${sidebarName.replace(/sidebar$/i, '')}-complete`,
+            items: sidebar,
+            collapsed: true,
+            collapsible: true
+          };
+
+          // Browse through all documents of this sidebar
+          pickHtmlArticlesRecursive(rootCategory, [], versionInfo, `${siteAddress}docs/`, docusaurusBuildDir, siteConfig);
+
+          // Create all PDF files for this sidebar
+          const sidebarArticles = await createPdfFilesRecursive(
+            enqueue,
+            language,
+            rootCategory,
+            [],
+            [],
+            versionInfo,
+            pluginOptions,
+            siteConfig,
+            versionBuildDir,
+            versionPdfPath,
+            browser,
+            siteAddress,
+            productTitle,
+            productVersion
+          );
+
+          allArticles.push(...sidebarArticles);
+          sidebarRoots.push(rootCategory);
+        }
+        else {
+          console.log(`${pluginLogPrefix}Sidebar '${sidebarName}' doesn't exist in version '${versionInfo.label}', continue without it...`);
+        }
+
+      }
+
+      // One PDF over all sidebars, offered as the "complete version" on every page
+      let completeEntry: LinkEntry | undefined;
+      if (pluginOptions.completePdf && allArticles.length > 0) {
+        const title = resolveLocalized(pluginOptions.completePdf.title, language) ?? siteConfig.projectName ?? 'Unnamed project';
+        const fileName: string = new GithubSlugger().slug(pluginOptions.completePdf.fileName ?? 'complete');
+        const outputDir = join(pdfBuildDir, versionPath);
+        fs.ensureDirSync(outputDir);
+        const file = `${[pdfPath, versionPath].filter(str => str != "").join("/")}/${fileName}.pdf`;
+
+        enqueue(file, () => createPdfFromArticles(
           language,
-          rootCategory, 
-          [], 
-          [], 
-          versionInfo, 
-          pluginOptions, 
-          siteConfig, 
-          versionBuildDir, 
-          versionPdfPath, 
-          browser, 
-          siteAddress, 
-          productTitle,
-          productVersion
-        );
+          title,
+          productVersion || versionInfo.label,
+          fileName,
+          allArticles,
+          pluginOptions,
+          siteConfig,
+          outputDir,
+          browser,
+          siteAddress
+        ));
 
-        // Save url to filename mappings
-        saveUrlToFileMappingsRecursive(rootCategory.items, linkToFile, [{
+        completeEntry = { label: title, file, type: 'root' };
+
+        if (versionInfo.isLast) {
+          // The site root is in no sidebar; give it the complete PDF so the button shows there too
+          linkToFile[stripTrailingSlash(siteConfig.baseUrl)] = [completeEntry];
+        }
+      }
+
+      // Save url to filename mappings
+      for (const rootCategory of sidebarRoots) {
+        const rootEntry: LinkEntry = {
           label: rootCategory.label,
           file: rootCategory.pdfFilename,
-          type: 'root'
-        }])
+          type: completeEntry ? 'section' : 'root'
+        };
+        saveUrlToFileMappingsRecursive(rootCategory.items, linkToFile, completeEntry ? [completeEntry, rootEntry] : [rootEntry]);
       }
-      else {
-        console.log(`${pluginLogPrefix}Sidebar '${sidebarName}' doesn't exist in version '${versionInfo.label}', continue without it...`);
-      }
-
     }
 
+    fs.writeFileSync(join(docusaurusBuildDir, 'pdfs.json'), JSON.stringify(linkToFile));
+
+    await queue.onIdle();
+    await Promise.all(tasks);
+  }
+  finally {
+    console.log("close browser")
+    await browser.close();
+
+    await new Promise((res)=>{
+        httpServer.close(res);
+    })
   }
 
-  fs.writeFileSync(join(docusaurusBuildDir, 'pdfs.json'), JSON.stringify(linkToFile));
-
-  await queue.onIdle()
-  console.log("close browser")
-  await browser.close();
-
-  await new Promise((res)=>{
-      httpServer.close(res);
-  })
+  if (failures.length > 0) {
+    throw new Error(`${pluginLogPrefix}${failures.length} PDF file(s) could not be created:\n${failures.join('\n')}`);
+  }
 
   console.log(`${pluginLogPrefix}generatePdfFiles finished!`);
 }
@@ -214,8 +281,8 @@ function stripTrailingSlash (str: string) {
 
 function saveUrlToFileMappingsRecursive(
   sideBarItems: any[],
-  output: { [key: string]: { label: string, file: string, type: 'root' | 'section' | 'chapter' }[] },
-  parents: { label: string, file: string, type: 'root' | 'section' | 'chapter' }[] = []) {
+  output: { [key: string]: LinkEntry[] },
+  parents: LinkEntry[] = []) {
 
   for (const item of sideBarItems) {
     if (item.permalink) {
@@ -302,7 +369,7 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
   }
 }
 
-async function createPdfFilesRecursive(queue: PQueue<PriorityQueue, QueueAddOptions>,
+async function createPdfFilesRecursive(enqueue: EnqueueFn,
   language: string,
   sideBarItem: any,
   parentTitles: string[],
@@ -329,7 +396,7 @@ async function createPdfFilesRecursive(queue: PQueue<PriorityQueue, QueueAddOpti
       const newParentIds = [...parentIds];
       newParentIds.push(sideBarItem.unversionedId);
       for (const categorySubItem of sideBarItem.items) {
-        const subDocs = await createPdfFilesRecursive(queue,
+        const subDocs = await createPdfFilesRecursive(enqueue,
           language,
           categorySubItem,
           newParentTitles,
@@ -370,20 +437,18 @@ async function createPdfFilesRecursive(queue: PQueue<PriorityQueue, QueueAddOpti
   }
 
   if (articles.length > 0) {
-    queue.add(
-      async ()=> {
-          await createPdfFromArticles(language, 
-            documentTitle,
-            productVersion || version.label,
-            pdfFilename,
-            articles,
-            pluginOptions,
-            siteConfig,
-            buildDir,
-            browser,
-            siteAddress);
-      }
-    )
+    enqueue(`${pdfPath}/${pdfFilename}.pdf`, () => createPdfFromArticles(
+      language,
+      documentTitle,
+      productVersion || version.label,
+      pdfFilename,
+      articles,
+      pluginOptions,
+      siteConfig,
+      buildDir,
+      browser,
+      siteAddress
+    ));
     sideBarItem.pdfFilename = `${pdfPath}/${pdfFilename}.pdf`;
   }
 
@@ -482,21 +547,26 @@ async function createPdfFromArticles(
   console.log(`${pluginLogPrefix}Creating PDF ${finalPdfFile}...`);
 
   const coverPage = await browser.newPage();
-  await coverPage.setContent(
-    pluginOptions.getPdfCoverPage(siteConfig, pluginOptions, documentTitle, documentVersion, language),
-    {
+  let titlePdfFile: Uint8Array;
+  try {
+    await coverPage.setContent(
+      pluginOptions.getPdfCoverPage(siteConfig, pluginOptions, documentTitle, documentVersion, language),
+      {
+        timeout: pluginOptions.puppeteerTimeout
+      });
+    titlePdfFile = await coverPage.pdf({
+      format: 'a4',
+      headerTemplate: pluginOptions.coverPageHeader,
+      footerTemplate: pluginOptions.coverPageFooter,
+      displayHeaderFooter: true,
+      printBackground: true,
+      margin: pluginOptions.coverMargins,
       timeout: pluginOptions.puppeteerTimeout
     });
-  const titlePdfFile = await coverPage.pdf({
-    format: 'a4',
-    headerTemplate: pluginOptions.coverPageHeader,
-    footerTemplate: pluginOptions.coverPageFooter,
-    displayHeaderFooter: true,
-    printBackground: true,
-    margin: pluginOptions.coverMargins,
-    timeout: pluginOptions.puppeteerTimeout
-  });
-  await coverPage.close();
+  }
+  finally {
+    await coverPage.close();
+  }
 
 
   let stylePath = articleList[0].stylePath;
@@ -571,6 +641,20 @@ async function createPdfFromArticles(
     page-break-before: always;
   }
 
+  h1, h2, h3, h4 {
+    break-after: avoid;
+  }
+
+  img {
+    max-width: 100%;
+    height: auto;
+    break-inside: avoid;
+  }
+
+  figure, tr {
+    break-inside: avoid;
+  }
+
   .toc-headings a {
     width: 100%;
     display: flex;
@@ -611,7 +695,7 @@ async function createPdfFromArticles(
     }
   }
 
-  let htmlContent = `
+  const wrapHtml = (body: string) => `
   <!DOCTYPE html>
   <html lang="${language}">
     <head>
@@ -622,29 +706,51 @@ async function createPdfFromArticles(
       ${htmlScripts}
     </head>
     <body>
-      ${htmlToc}${htmlArticles}
+      ${body}
     </body>
   </html>`;
 
+  // Fills the "_" placeholders of the TOC entries, in order, with the given page numbers.
+  const fillTocPageNumbers = (tocHtml: string, pageNumbers: number[]) => {
+    let index = 0;
+    return tocHtml.replace(/<span class="pageNumber">_<\/span>/g, () => {
+      const pageNumber = pageNumbers[index++];
+      return `<span class="pageNumber">${pageNumber ?? ''}</span>`;
+    });
+  };
+
   const page = await browser.newPage();
+  let contentPdfFile: Uint8Array;
+  try {
+    // Pass A: content only, to find the page of every TOC entry within the content.
+    const articlesPdf = await renderPdf(wrapHtml(htmlArticles), false);
+    const contentPages = getTocContentPages(tocLinksInfos, await getPdfPageTexts(articlesPdf));
 
-  const parsedData = await pdfParse(await generateContentPdf() as Buffer, { verbosityLevel: 0 });
+    // Pass B: TOC only (with realistic numbers), to learn how many pages the TOC takes. The
+    // content starts on a fresh page after it because every h1 breaks the page.
+    const tocPdf = await renderPdf(wrapHtml(fillTocPageNumbers(htmlToc, contentPages)), false);
+    const tocPageCount = (await PDFDocument.load(tocPdf)).getPageCount();
 
-  htmlContent = getPageWithFixedToc(pluginOptions.footerParser, tocLinksInfos, parsedData.text, htmlContent);
+    // Final pass: TOC + content with the real numbers, plus the PDF outline (bookmarks).
+    const finalHtml = wrapHtml(fillTocPageNumbers(htmlToc, contentPages.map((n) => n + tocPageCount)) + htmlArticles);
+    contentPdfFile = await renderPdf(finalHtml, true);
 
-
-  const contentPdfFile = await generateContentPdf();
-  if (pluginOptions.keepDebugHtmls) {
-    htmlContent = await page.content();
-    fs.writeFileSync(contentHtmlFile, htmlContent);
+    if (pluginOptions.keepDebugHtmls) {
+      fs.writeFileSync(contentHtmlFile, await page.content());
+    }
+  }
+  finally {
+    await page.close();
   }
 
-  await page.close();
   await mergeMultiplePDF([titlePdfFile, contentPdfFile], finalPdfFile);
 
-  async function generateContentPdf(): Promise<Uint8Array> {
-    await page.goto(siteAddress);
-    await page.setContent(htmlContent, {
+  async function renderPdf(html: string, outline: boolean): Promise<Uint8Array> {
+    // Load the site first, so relative URLs in the content resolve against it
+    await page.goto(siteAddress, {
+      timeout: pluginOptions.puppeteerTimeout
+    });
+    await page.setContent(html, {
       timeout: pluginOptions.puppeteerTimeout
     });
     return await page.pdf({
@@ -655,13 +761,11 @@ async function createPdfFromArticles(
       printBackground: true,
       scale: 1,
       margin: pluginOptions.margins,
+      outline: outline,
       timeout: pluginOptions.puppeteerTimeout
     });
   }
 
-  // Merges the given PDFs (in order) into a single file. The last PDF is used
-  // as the base document and the others are inserted in front, so its internal
-  // links (e.g. the TOC jump targets) stay intact.
   async function mergeMultiplePDF(pdfFiles: Uint8Array[], name: string): Promise<void> {
     if (pdfFiles.length === 0) {
       throw new Error('mergeMultiplePDF called with no PDF files');
@@ -686,8 +790,8 @@ const escapeHeaderRegex = (header: string) => {
   return header
     // escape all regex reserved characters
     .replace(/[-[\]/{}()*+?.\\^$|]/g, '\\$&')
-    // replace white-spaces to allow line breaks
-    .replace(/\s/g, '(\\s|\\s\\n)');
+    // allow any whitespace, including line breaks, between words
+    .replace(/\s+/g, '\\s+');
 }
 
 const pdfHeaderRegex = [
@@ -774,61 +878,52 @@ const decodeHtml = (str: string) => {
     .replace(/[\u200B-\u200D\uFEFF]/g, '');
 }
 
-const getPageWithFixedToc = (footerRegEx: RegExp, tocList: TocInfo[], pdfContent: string, htmlContent: string) => {
-
-  const pdfPages = pdfContent.split(footerRegEx);
-  if (!pdfPages.length) {
-    return htmlContent;
-  }
-
-  const footerRegexString = footerRegEx.source;
-  const headerFooterRegexString = `.*\\n${footerRegexString}`;
-  const headerFooterRegex = new RegExp(headerFooterRegexString, footerRegEx.flags);
-
-  let pdfContentTOC = pdfContent;
-  pdfContentTOC = pdfContentTOC.replace(headerFooterRegex, '');
-  pdfContentTOC = pdfContentTOC.replace(/_/g, '');
-  pdfContentTOC = pdfContentTOC.split('\n').map(line => line.trimEnd()).join('\n');
-
-  let linesArray = pdfContentTOC.split('\n');
-  linesArray = linesArray.filter(line => line.trim() !== '');
-  let linesTOC = linesArray.slice(1, 1 + tocList.length);
-
-
-  let pageIndex = 0;
-  let lastPageIndex = pageIndex;
-  for (let i1 = 0; i1 < tocList.length; i1++) {
-    const elementTOC = linesTOC[i1];
-    let found = false;
-    for (; pageIndex < pdfPages.length; pageIndex++) {
-      let page = pdfPages[pageIndex];
-      found = false;
-      for (let i = 0; i < pdfHeaderRegex.length; ++i) {
-        if (pdfHeaderRegex[i](decodeHtml(elementTOC)).test(page)) {
-          htmlContent = htmlContent.replace(
-              '<span class="pageNumber">_</span>',
-              `<span class="pageNumber">${pageIndex + 1}</span>`
-          );
-          lastPageIndex = pageIndex;
-          found = true;
-          break;
+/** Extracts the text of every page of a PDF, indexed by page (0-based). */
+const getPdfPageTexts = async (pdf: Uint8Array): Promise<string[]> => {
+  const pageTexts: string[] = [];
+  await pdfParse(Buffer.from(pdf), {
+    verbosityLevel: 0,
+    // Same line joining as pdf-parse's default renderer, but keeps the text per page
+    pagerender: async (pageData: any) => {
+      const textContent = await pageData.getTextContent({ normalizeWhitespace: false, disableCombineTextItems: false });
+      let lastY: number | undefined;
+      let text = '';
+      for (const item of textContent.items) {
+        if (lastY === item.transform[5] || !lastY) {
+          text += item.str;
+        } else {
+          text += '\n' + item.str;
         }
+        lastY = item.transform[5];
       }
-      if (found) {
+      pageTexts[pageData.pageNumber - 1] = text;
+      return text;
+    }
+  } as any);
+  return pageTexts;
+};
+
+/**
+ * Finds the page (1-based) of every TOC entry in the page texts of the content. Headings are
+ * searched in document order from the page of the previous entry; an entry that is not found
+ * gets the page of the previous one.
+ */
+const getTocContentPages = (tocList: TocInfo[], pageTexts: string[]): number[] => {
+  const pages: number[] = [];
+  let lastPageIndex = 0;
+  for (const tocEntry of tocList) {
+    const heading = decodeHtml(tocEntry.text).trim();
+    for (let pageIndex = lastPageIndex; pageIndex < pageTexts.length; pageIndex++) {
+      const pageText = pageTexts[pageIndex] ?? '';
+      if (pdfHeaderRegex.some((regex) => regex(heading).test(pageText))) {
+        lastPageIndex = pageIndex;
         break;
       }
     }
-    if (!found){
-      htmlContent = htmlContent.replace(
-          '<span class="pageNumber">_</span>',
-          `<span class="pageNumber">${lastPageIndex + 1}</span>`
-      );
-      pageIndex = lastPageIndex
-    }
+    pages.push(lastPageIndex + 1);
   }
-
-  return htmlContent;
-}
+  return pages;
+};
 
 const getURL = (origin: string, filePath: string) => {
   return origin + '/' + filePath.substring(filePath.startsWith('/') ? 1 : 0);

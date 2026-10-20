@@ -9,6 +9,11 @@ const isStringOrArrayOfStrings = Joi.alternatives().try(
   Joi.array().items(Joi.string())
 );
 
+const localizedString = Joi.alternatives().try(
+  Joi.string(),
+  Joi.object().pattern(Joi.string(), Joi.string())
+);
+
 const defaultCoverPageFunction: PageFunction = (siteConfig, _pluginConfig, pageTitle, _version, _language) => {
   return `
     <!DOCTYPE html>
@@ -106,7 +111,8 @@ const schema = Joi.object<PapersaurusPluginOptions>({
   author: Joi.string().default("").allow(""),
   footerParser: Joi.object<RegExp>().instance(RegExp),
   keepDebugHtmls: Joi.boolean().default(false),
-  concurrency: Joi.number().default(os.cpus().length),
+  // Root and section PDFs are memory-heavy; more parallel renders time out on large machines.
+  concurrency: Joi.number().default(Math.max(1, Math.min(4, os.cpus().length))),
   puppeteerTimeout: Joi.number().default(30000),
   sidebarNames: isStringOrArrayOfStrings.default([]),
   versions: isStringOrArrayOfStrings.default([]),
@@ -119,6 +125,14 @@ const schema = Joi.object<PapersaurusPluginOptions>({
   })).default([]),
   ignoreCssSelectors: isStringOrArrayOfStrings.default([]),
   getPdfFileName: Joi.func().default(() => defaultPdfFileNameFunction),
+  sidebarTitles: Joi.object().pattern(Joi.string(), localizedString).default({}),
+  completePdf: Joi.alternatives().try(
+    Joi.boolean().valid(false),
+    Joi.object({
+      title: localizedString.required(),
+      fileName: Joi.string(),
+    })
+  ).default(false),
 });
 
 type ValidateFn = (
@@ -142,6 +156,16 @@ export function processOptions(
   const pluginOptions = { ...options } as PapersaurusPluginOptions;
   if (!pluginOptions.footerParser) {
     pluginOptions.footerParser = RegExp(`© ${pluginOptions.author}\\d{4}-\\d{2}-\\d{2}Page \\d* \\/ \\d*`, 'g');
+  }
+
+  if (!pluginOptions.sidebarTitles) {
+    pluginOptions.sidebarTitles = {};
+  }
+  if (!pluginOptions.completePdf) {
+    pluginOptions.completePdf = false;
+  }
+  if (!pluginOptions.concurrency) {
+    pluginOptions.concurrency = Math.max(1, Math.min(4, os.cpus().length));
   }
 
   ensureArray(pluginOptions, "ignoreDocs");

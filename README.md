@@ -18,7 +18,7 @@ It uses  [Puppeteer](https://pptr.dev/) to convert html pages to PDF.
 
 1. Puppeteer does not yet support individual headers / footers for the cover page. Therefore this plugin generates a PDF with just uses [easy-pdf-merge](https://www.npmjs.com/package/easy-pdf-merge) See [this SO question](https://stackoverflow.com/questions/55470714/trying-to-hide-first-footer-header-on-pdf-generated-with-puppeteer)
 
-2. Puppeteer does not yet support the generation of TOCs. See [this feature request](https://github.com/puppeteer/puppeteer/issues/1778) and [this Chromium bug](https://bugs.chromium.org/p/chromium/issues/detail?id=840455). Therefore this package generates a PDF, then parses it again to update the page numbers in the TOC. Therefore the parameter  footerParser...
+2. Puppeteer does not yet support the generation of TOCs. See [this feature request](https://github.com/puppeteer/puppeteer/issues/1778) and [this Chromium bug](https://bugs.chromium.org/p/chromium/issues/detail?id=840455). Therefore this package renders the content once on its own, reads the page of every heading from that PDF, renders the TOC alone to learn how many pages it takes, and then renders TOC and content together with the final page numbers. The TOC entries are links, and the PDF carries an outline (bookmarks) built from the headings.
 
 ## Installation
 
@@ -67,9 +67,45 @@ Default: `false`
 
 ### puppeteerTimeout
 
-Large PDFs might cause a timeout error on puppeteer. Use this parameter to set the puppeteer timeout in ms.
+Large PDFs might cause a timeout error on puppeteer. Use this parameter to set the puppeteer timeout in ms. It applies to loading the site, setting the content and printing the PDF.
 
 Default: `30000`
+
+### concurrency
+
+Number of PDFs rendered in parallel. Section and complete PDFs are large; too many parallel renders exhaust the machine and run into timeouts.
+
+Default: the number of CPUs, at most `4`
+
+### sidebarTitles
+
+Title of each sidebar's PDF, keyed by sidebar name. The value is a string or a map from locale to string. Without a title the sidebar name is used. Before 3.6.5 every sidebar PDF was titled with the `projectName` and all of them were written to the same file.
+
+```
+  sidebarTitles: {
+    setupSidebar: { en: 'Setup', de: 'Einrichtung' },
+    apiSidebar: 'API',
+  },
+```
+
+The file name of a sidebar's PDF is derived from the sidebar name, e.g. `setup-complete.pdf` for `setupSidebar`.
+
+Default: `{}`
+
+### completePdf
+
+Generates one additional PDF over all sidebars and offers it as the "complete version" in the download menu of every page, including the site root (`baseUrl`). Each sidebar's PDF is then listed as a section.
+
+```
+  completePdf: {
+    title: { en: 'Complete documentation', de: 'Gesamtdokumentation' },
+    fileName: 'complete',
+  },
+```
+
+`title` is a string or a map from locale to string, `fileName` (without extension) defaults to `complete`.
+
+Default: `false`
 
 ### sidebarNames
 
@@ -124,7 +160,7 @@ Default: `[]`
 
 ### addDownloadButton
 
-Set this parameter to `true`, if you want the plugin to add a PDF download button to the documentation website.
+Set this parameter to `true`, if you want the plugin to add a PDF download button to the documentation website. The button appears on every page that has an entry in the generated `pdfs.json`, docs pages and (with `completePdf`) the site root.
 
 Default: `true`
 
@@ -255,11 +291,7 @@ The value may be used in `getPdfCoverPage`, `getPdfPageHeader` or `getPdfPageFoo
 
 ### footerParser
 
-In order to update the TOC with the correct page numbers, this package has to parse the generated PDF and then manually update the TOC. In order to split the parsed text by pages, a regex expression is used to identify the content footer text. Think of calling jQuery's ```$.text()``` on the footer wrapper. The regular expression must match this text.
-
-Example:
-
-```/© Your Company\d{4}-\d{2}-\d{2}Page \d* \/ \d*/g```
+Deprecated and ignored since 3.6.5. The TOC page numbers are computed from a content-only render, so no footer text has to be parsed any more. The option is still accepted so existing configurations keep validating.
 
 ### coverMargins
 

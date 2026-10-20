@@ -103,7 +103,10 @@ if (ExecutionEnvironment.canUseDOM) {
         };
 
         const checkAndInsertPdfButtons = function () {
-            if (!$("html").hasClass("plugin-docs")) {
+            // Show the button on every page pdfs.json lists, not only on docs pages
+            if (getDownloadItems().length === 0) {
+                $("#pdfDownloadMenu").remove();
+                $("#pdfLinkSidebar").remove();
                 return;
             }
             if (!$("#pdfLink").length) {

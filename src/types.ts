@@ -22,6 +22,10 @@ export interface PluginOptions {
   margins?: Margins;
   coverMargins?: Margins;
   author?: string;
+  /**
+   * @deprecated Ignored since 3.6.5. TOC page numbers are computed from a content-only render,
+   * so no footer text has to be parsed any more. Still accepted for backwards compatibility.
+   */
   footerParser?: RegExp;
   keepDebugHtmls?: boolean;
   puppeteerTimeout?: number;
@@ -33,7 +37,27 @@ export interface PluginOptions {
   useExtraPaths?: UsePath[];
   ignoreCssSelectors?: string[];
   getPdfFileName?: FileNameFunction;
+  /**
+   * Per-sidebar document title, as a string or a locale → title map. Replaces the projectName as
+   * the root label and file name of that sidebar's PDF.
+   */
+  sidebarTitles?: Record<string, LocalizedString>;
+  /**
+   * Generate one PDF over all sidebars and list it as the "complete version" on every page,
+   * including the site root. false = off.
+   */
+  completePdf?: false | CompletePdfOptions;
 }
+
+/** A plain string, or a map from locale (e.g. "en", "de") to the string for that locale. */
+export type LocalizedString = string | Record<string, string>;
+
+export type CompletePdfOptions = {
+  /** Title of the complete PDF (cover page, page header, download menu). */
+  title: LocalizedString;
+  /** File name without extension, default "complete". */
+  fileName?: string;
+};
 
 export type PapersaurusPluginOptions = Required<PluginOptions>;
 
