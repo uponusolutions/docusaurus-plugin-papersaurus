@@ -338,7 +338,8 @@ function pickHtmlArticlesRecursive(sideBarItem: any,
       }
       else {
         console.log("a", sideBarItem.label)
-        sideBarItem.unversionedId = sideBarItem.label || "untitled";
+        // Keep a preset id (the sidebar roots carry one), else name the category by its label
+        sideBarItem.unversionedId = sideBarItem.unversionedId || sideBarItem.label || "untitled";
       }
       const newParentTitles = [...parentTitles];
       newParentTitles.push(sideBarItem.label);
@@ -734,7 +735,12 @@ async function createPdfFromArticles(
     const tocPageCount = (await PDFDocument.load(tocPdf)).getPageCount();
 
     // Final pass: TOC + content with the real numbers, plus the PDF outline (bookmarks).
-    const finalHtml = wrapHtml(fillTocPageNumbers(htmlToc, contentPages.map((n) => n + tocPageCount)) + htmlArticles);
+    // A content-only render may start with an empty page (the first h1 forces a page break),
+    // while in the final document the content starts right after the TOC. The first TOC entry is
+    // the first heading of the content, so its page marks where the content starts.
+    const firstContentPage = contentPages.length > 0 ? contentPages[0] : 1;
+    const finalPageNumbers = contentPages.map((n) => n - firstContentPage + 1 + tocPageCount);
+    const finalHtml = wrapHtml(fillTocPageNumbers(htmlToc, finalPageNumbers) + htmlArticles);
     contentPdfFile = await renderPdf(finalHtml, true);
 
     if (pluginOptions.keepDebugHtmls) {
