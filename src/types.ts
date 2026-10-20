@@ -23,7 +23,7 @@ export interface PluginOptions {
   coverMargins?: Margins;
   author?: string;
   /**
-   * @deprecated Ignored since 3.6.5. TOC page numbers are computed from a content-only render,
+   * @deprecated Ignored since 3.6.5. TOC page numbers are read from a render of the final layout,
    * so no footer text has to be parsed any more. Still accepted for backwards compatibility.
    */
   footerParser?: RegExp;
