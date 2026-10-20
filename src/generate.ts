@@ -7,6 +7,7 @@
 
 import {
   PapersaurusPluginOptions,
+  PdfPart,
   TocInfo,
 } from './types';
 import { Props, LoadedPlugin } from '@docusaurus/types';
@@ -21,7 +22,7 @@ const join = require('path').join;
 import express = require('express');
 import { AddressInfo } from 'net';
 import * as fs from 'fs-extra';
-import { PDFDocument } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNull, PDFString, PDFHexString } from 'pdf-lib';
 import { resolveLocalized } from './i18n';
 
 // github-slugger 2 is ESM-only: plain require() returns the namespace, Docusaurus' loader the class
@@ -584,7 +585,7 @@ async function createPdfFromArticles(
   let titlePdfFile: Uint8Array;
   try {
     await coverPage.setContent(
-      pluginOptions.getPdfCoverPage(siteConfig, pluginOptions, documentTitle, documentVersion, language),
+      pluginOptions.getPdfCoverPage(siteConfig, pluginOptions, documentTitle, documentVersion, language, 'cover'),
       {
         timeout: pluginOptions.puppeteerTimeout
       });
@@ -704,6 +705,11 @@ async function createPdfFromArticles(
     page-break-before: always;
   }
 
+  .papersaurus-first {
+    page-break-before: auto !important;
+    break-before: auto !important;
+  }
+
   h1, h2, h3, h4 {
     break-after: avoid;
   }
@@ -784,17 +790,34 @@ async function createPdfFromArticles(
 
   const page = await browser.newPage();
   let contentPdfFile: Uint8Array;
+  let tocPdfFile: Uint8Array | undefined;
+  let tocPageNumbers: number[] = [];
   try {
-    // Measuring pass: the final layout (TOC + content) with placeholder page numbers. The page
-    // of every heading in it is its final page number, because the numbers only change the width
-    // of the TOC lines, not their count. Measuring the final layout directly avoids guessing how
-    // many pages the TOC takes or whether a partial document starts with an empty page.
-    const measureHtml = wrapHtml(fillTocPageNumbers(htmlToc, tocLinksInfos.map(() => 888)) + htmlArticles);
-    const pageNumbers = getTocContentPages(tocLinksInfos, await getPdfPageTexts(await renderPdf(measureHtml, false)));
+    if (pluginOptions.numberPagesAfterToc) {
+      // Content on its own, so its page numbers start at 1. Chrome writes named destinations only
+      // for ids a link in the same document points to, so hidden links to the TOC targets go first.
+      const targetLinks = tocLinksInfos.map((info) => `<a href="${info.href}">&#8203;</a>`).join('');
+      const contentHtml = `<div style="position:absolute;top:0;left:0;width:1px;height:1px;overflow:hidden">${targetLinks}</div>`
+        + markFirstHeading(htmlArticles);
+      contentPdfFile = await renderPdf(wrapHtml(contentHtml), true, 'content');
+      tocPageNumbers = getTocContentPages(tocLinksInfos, await getPdfPageTexts(contentPdfFile));
 
-    // Final pass: the real numbers, plus the PDF outline (bookmarks).
-    const finalHtml = wrapHtml(fillTocPageNumbers(htmlToc, pageNumbers) + htmlArticles);
-    contentPdfFile = await renderPdf(finalHtml, true);
+      // TOC on its own; its links become URI links here and are pointed at the content after merging
+      const tocHtml = fillTocPageNumbers(htmlToc, tocPageNumbers).replace(/href="#/g, `href="${tocLinkPrefix}`);
+      tocPdfFile = await renderPdf(wrapHtml(markFirstHeading(tocHtml)), false, 'toc');
+    }
+    else {
+      // Measuring pass: the final layout (TOC + content) with placeholder page numbers. The page
+      // of every heading in it is its final page number, because the numbers only change the width
+      // of the TOC lines, not their count. Measuring the final layout directly avoids guessing how
+      // many pages the TOC takes or whether a partial document starts with an empty page.
+      const measureHtml = wrapHtml(fillTocPageNumbers(htmlToc, tocLinksInfos.map(() => 888)) + htmlArticles);
+      const pageNumbers = getTocContentPages(tocLinksInfos, await getPdfPageTexts(await renderPdf(measureHtml, false, 'content')));
+
+      // Final pass: the real numbers, plus the PDF outline (bookmarks).
+      const finalHtml = wrapHtml(fillTocPageNumbers(htmlToc, pageNumbers) + htmlArticles);
+      contentPdfFile = await renderPdf(finalHtml, true, 'content');
+    }
 
     if (pluginOptions.keepDebugHtmls) {
       fs.writeFileSync(contentHtmlFile, await page.content());
@@ -804,9 +827,16 @@ async function createPdfFromArticles(
     await page.close();
   }
 
-  await mergeMultiplePDF([titlePdfFile, contentPdfFile], finalPdfFile);
+  if (tocPdfFile) {
+    const pageOfTarget = new Map<string, number>();
+    tocLinksInfos.forEach((info, i) => pageOfTarget.set(info.href.substring(1), tocPageNumbers[i]));
+    await mergeWithSeparateToc(titlePdfFile, tocPdfFile, contentPdfFile, pageOfTarget, finalPdfFile);
+  }
+  else {
+    await mergeMultiplePDF([titlePdfFile, contentPdfFile], finalPdfFile);
+  }
 
-  async function renderPdf(html: string, outline: boolean): Promise<Uint8Array> {
+  async function renderPdf(html: string, outline: boolean, part: PdfPart): Promise<Uint8Array> {
     // Load the site first, so relative URLs in the content resolve against it
     await page.goto(siteAddress, {
       timeout: pluginOptions.puppeteerTimeout
@@ -816,8 +846,8 @@ async function createPdfFromArticles(
     });
     return await page.pdf({
       format: 'a4',
-      headerTemplate: pluginOptions.getPdfPageHeader(siteConfig, pluginOptions, documentTitle, documentVersion, language),
-      footerTemplate: pluginOptions.getPdfPageFooter(siteConfig, pluginOptions, documentTitle, documentVersion, language),
+      headerTemplate: pluginOptions.getPdfPageHeader(siteConfig, pluginOptions, documentTitle, documentVersion, language, part),
+      footerTemplate: pluginOptions.getPdfPageFooter(siteConfig, pluginOptions, documentTitle, documentVersion, language, part),
       displayHeaderFooter: true,
       printBackground: true,
       scale: 1,
@@ -826,6 +856,57 @@ async function createPdfFromArticles(
       timeout: pluginOptions.puppeteerTimeout
     });
   }
+
+  // Merges cover, TOC and content (the base, so its outline and named destinations stay intact)
+  // and points the TOC links, rendered as URI links, at their targets in the content.
+  async function mergeWithSeparateToc(cover: Uint8Array, toc: Uint8Array, content: Uint8Array, pageOfTarget: Map<string, number>, name: string): Promise<void> {
+    const baseDoc = await PDFDocument.load(content);
+    removeTocTargetLinks(baseDoc);
+    const namedDestinations = getNamedDestinations(baseDoc);
+
+    let insertAt = 0;
+    const coverDoc = await PDFDocument.load(cover);
+    for (const p of await baseDoc.copyPages(coverDoc, coverDoc.getPageIndices())) {
+      baseDoc.insertPage(insertAt++, p);
+    }
+    const tocDoc = await PDFDocument.load(toc);
+    const tocPages = [];
+    for (const p of await baseDoc.copyPages(tocDoc, tocDoc.getPageIndices())) {
+      baseDoc.insertPage(insertAt++, p);
+      tocPages.push(p);
+    }
+    const firstContentPage = insertAt;
+
+    for (const tocPage of tocPages) {
+      const annots = tocPage.node.lookup(PDFName.of('Annots'));
+      if (!(annots instanceof PDFArray)) {
+        continue;
+      }
+      for (let i = 0; i < annots.size(); i++) {
+        const annot = annots.lookup(i);
+        const action = annot instanceof PDFDict ? annot.lookup(PDFName.of('A')) : undefined;
+        const uri = action instanceof PDFDict ? action.lookup(PDFName.of('URI')) : undefined;
+        const url = uri instanceof PDFString || uri instanceof PDFHexString ? uri.decodeText() : '';
+        if (!(annot instanceof PDFDict) || !url.startsWith(tocLinkPrefix)) {
+          continue;
+        }
+        const target = url.substring(tocLinkPrefix.length);
+        annot.delete(PDFName.of('A'));
+        if (namedDestinations.has(target)) {
+          annot.set(PDFName.of('Dest'), PDFName.of(target));
+        }
+        else {
+          // no named destination: jump to the top of the target's page
+          const pageIndex = Math.min(baseDoc.getPageCount() - 1, firstContentPage + (pageOfTarget.get(target) ?? 1) - 1);
+          annot.set(PDFName.of('Dest'), baseDoc.context.obj([baseDoc.getPage(pageIndex).ref, PDFName.of('XYZ'), PDFNull, PDFNull, PDFNull]));
+        }
+      }
+    }
+
+    baseDoc.setAuthor(pluginOptions.author);
+    baseDoc.setTitle(documentTitle);
+    await fs.writeFile(name, await baseDoc.save());
+  };
 
   async function mergeMultiplePDF(pdfFiles: Uint8Array[], name: string): Promise<void> {
     if (pdfFiles.length === 0) {
@@ -848,6 +929,47 @@ async function createPdfFromArticles(
 }
 
 type TocEntry = { level: number, id: string, text: string };
+
+/** Prefix of the TOC links while the TOC is rendered on its own (numberPagesAfterToc). */
+const tocLinkPrefix = 'https://papersaurus.invalid/toc#';
+
+/**
+ * Lets the first heading of a separately rendered part start on the first page: with the site
+ * stylesheet, the forced page break of a leading h1 otherwise leaves the first page empty.
+ */
+const markFirstHeading = (html: string) => {
+  const $ = cheerio.load(html, null, false);
+  $('h1, h2, h3, h4, h5, h6').first().addClass('papersaurus-first');
+  return $.html();
+};
+
+/** Names of the named destinations (catalog /Dests dictionary, as Chrome writes them). */
+const getNamedDestinations = (doc: PDFDocument): Set<string> => {
+  const names = new Set<string>();
+  const dests = doc.catalog.lookup(PDFName.of('Dests'));
+  if (dests instanceof PDFDict) {
+    for (const [key] of dests.entries()) {
+      names.add(key.decodeText());
+    }
+  }
+  return names;
+};
+
+/** Removes the hidden helper links to the TOC targets from the content. */
+const removeTocTargetLinks = (doc: PDFDocument) => {
+  for (const page of doc.getPages()) {
+    const annots = page.node.lookup(PDFName.of('Annots'));
+    if (!(annots instanceof PDFArray)) {
+      continue;
+    }
+    const kept = annots.asArray().filter((ref) => {
+      const annot = doc.context.lookup(ref);
+      const dest = annot instanceof PDFDict ? annot.get(PDFName.of('Dest')) : undefined;
+      return !(dest instanceof PDFName && dest.decodeText().startsWith('papersaurus-toc-'));
+    });
+    page.node.set(PDFName.of('Annots'), doc.context.obj(kept));
+  }
+};
 
 const escapeHtml = (text: string) => text
   .replace(/&/g, '&amp;')

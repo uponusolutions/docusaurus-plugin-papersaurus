@@ -123,6 +123,18 @@ the body text.
 
 Default: `false`
 
+### numberPagesAfterToc
+
+Renders the TOC separately from the content, so the page numbers start at 1 on the first content
+page and the TOC pages are not counted; the TOC entries show these numbers. The TOC links still jump
+to their headings, and the bookmarks come from the content.
+
+The page functions (`getPdfCoverPage`, `getPdfPageHeader`, `getPdfPageFooter`) get the part they
+render as sixth argument: `'cover'`, `'toc'` or `'content'`. Leave the page number out of the footer
+for `'toc'`; the default footer does.
+
+Default: `false`
+
 ### sidebarNames
 
 The plugin is using your `sidebars.js` file to find the sections and documents. Since the file can contain multiple sidebars, add the name(s) of the sidebar(s) that should be used to generate files. If none is specified all will be used.

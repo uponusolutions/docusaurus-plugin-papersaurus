@@ -53,7 +53,15 @@ export interface PluginOptions {
    * front, and the TOC and the bookmarks nest along the sidebar. false keeps one flat level per page.
    */
   structureBySidebar?: boolean;
+  /**
+   * Render the TOC separately, so the page numbers start at 1 on the first content page and the TOC
+   * pages are not counted. The page functions get `part` = 'toc' for the TOC pages.
+   */
+  numberPagesAfterToc?: boolean;
 }
+
+/** The part of the PDF a page function renders. */
+export type PdfPart = 'cover' | 'toc' | 'content';
 
 /** A plain string, or a map from locale (e.g. "en", "de") to the string for that locale. */
 export type LocalizedString = string | Record<string, string>;
@@ -72,7 +80,8 @@ export type PageFunction = (
   pluginConfig: PapersaurusPluginOptions,
   pageTitle: string,
   version: string,
-  language: string
+  language: string,
+  part?: PdfPart
 ) => string;
 
 export type FileNameFunction = (

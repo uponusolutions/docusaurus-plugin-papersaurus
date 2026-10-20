@@ -49,12 +49,14 @@ const defaultPageHeaderFunction: PageFunction = (_siteConfig, pluginConfig, page
   `;
 };
 
-const defaultPageFooterFunction: PageFunction = (_siteConfig, pluginConfig, _pageTitle, _version, _language) => {
+const defaultPageFooterFunction: PageFunction = (_siteConfig, pluginConfig, _pageTitle, _version, _language, part) => {
+  // TOC pages rendered on their own (numberPagesAfterToc) carry no page number
+  const pageNumber = part === 'toc' ? '' : `Page <span class='pageNumber'></span> / <span class='totalPages'></span>`;
   return `
     <div style="height:1cm;display:flex;margin: 0 1.5cm;color: #005479;font-size:9px;font-family:sans-serif;width:100%;">
       <span style="flex-grow: 1; width: 33%;">© ${pluginConfig.author}</span>
       <span style="flex-grow: 1; width: 33%; text-align:center;">${new Date().toISOString().substring(0,10)}</span>
-      <span style="flex-grow: 1; width: 33%; text-align:right;">Page <span class='pageNumber'></span> / <span class='totalPages'></span></span>
+      <span style="flex-grow: 1; width: 33%; text-align:right;">${pageNumber}</span>
     </div>
   `;
 };
@@ -134,6 +136,7 @@ const schema = Joi.object<PapersaurusPluginOptions>({
     })
   ).default(false),
   structureBySidebar: Joi.boolean().default(false),
+  numberPagesAfterToc: Joi.boolean().default(false),
 });
 
 type ValidateFn = (
@@ -167,6 +170,9 @@ export function processOptions(
   }
   if (!pluginOptions.structureBySidebar) {
     pluginOptions.structureBySidebar = false;
+  }
+  if (!pluginOptions.numberPagesAfterToc) {
+    pluginOptions.numberPagesAfterToc = false;
   }
   if (!pluginOptions.concurrency) {
     pluginOptions.concurrency = Math.max(1, Math.min(4, os.cpus().length));
