@@ -9,6 +9,11 @@ const isStringOrArrayOfStrings = Joi.alternatives().try(
   Joi.array().items(Joi.string())
 );
 
+const localizedString = Joi.alternatives().try(
+  Joi.string(),
+  Joi.object().pattern(Joi.string(), Joi.string())
+);
+
 const defaultCoverPageFunction: PageFunction = (siteConfig, _pluginConfig, pageTitle, _version, _language) => {
   return `
     <!DOCTYPE html>
@@ -44,12 +49,14 @@ const defaultPageHeaderFunction: PageFunction = (_siteConfig, pluginConfig, page
   `;
 };
 
-const defaultPageFooterFunction: PageFunction = (_siteConfig, pluginConfig, _pageTitle, _version, _language) => {
+const defaultPageFooterFunction: PageFunction = (_siteConfig, pluginConfig, _pageTitle, _version, _language, part) => {
+  // TOC pages rendered on their own (numberPagesAfterToc) carry no page number
+  const pageNumber = part === 'toc' ? '' : `Page <span class='pageNumber'></span> / <span class='totalPages'></span>`;
   return `
     <div style="height:1cm;display:flex;margin: 0 1.5cm;color: #005479;font-size:9px;font-family:sans-serif;width:100%;">
       <span style="flex-grow: 1; width: 33%;">© ${pluginConfig.author}</span>
       <span style="flex-grow: 1; width: 33%; text-align:center;">${new Date().toISOString().substring(0,10)}</span>
-      <span style="flex-grow: 1; width: 33%; text-align:right;">Page <span class='pageNumber'></span> / <span class='totalPages'></span></span>
+      <span style="flex-grow: 1; width: 33%; text-align:right;">${pageNumber}</span>
     </div>
   `;
 };
@@ -106,7 +113,8 @@ const schema = Joi.object<PapersaurusPluginOptions>({
   author: Joi.string().default("").allow(""),
   footerParser: Joi.object<RegExp>().instance(RegExp),
   keepDebugHtmls: Joi.boolean().default(false),
-  concurrency: Joi.number().default(os.cpus().length),
+  // Root and section PDFs are memory-heavy; more parallel renders time out on large machines.
+  concurrency: Joi.number().default(Math.max(1, Math.min(4, os.cpus().length))),
   puppeteerTimeout: Joi.number().default(30000),
   sidebarNames: isStringOrArrayOfStrings.default([]),
   versions: isStringOrArrayOfStrings.default([]),
@@ -119,6 +127,16 @@ const schema = Joi.object<PapersaurusPluginOptions>({
   })).default([]),
   ignoreCssSelectors: isStringOrArrayOfStrings.default([]),
   getPdfFileName: Joi.func().default(() => defaultPdfFileNameFunction),
+  sidebarTitles: Joi.object().pattern(Joi.string(), localizedString).default({}),
+  completePdf: Joi.alternatives().try(
+    Joi.boolean().valid(false),
+    Joi.object({
+      title: localizedString.required(),
+      fileName: Joi.string(),
+    })
+  ).default(false),
+  structureBySidebar: Joi.boolean().default(false),
+  numberPagesAfterToc: Joi.boolean().default(false),
 });
 
 type ValidateFn = (
@@ -142,6 +160,22 @@ export function processOptions(
   const pluginOptions = { ...options } as PapersaurusPluginOptions;
   if (!pluginOptions.footerParser) {
     pluginOptions.footerParser = RegExp(`© ${pluginOptions.author}\\d{4}-\\d{2}-\\d{2}Page \\d* \\/ \\d*`, 'g');
+  }
+
+  if (!pluginOptions.sidebarTitles) {
+    pluginOptions.sidebarTitles = {};
+  }
+  if (!pluginOptions.completePdf) {
+    pluginOptions.completePdf = false;
+  }
+  if (!pluginOptions.structureBySidebar) {
+    pluginOptions.structureBySidebar = false;
+  }
+  if (!pluginOptions.numberPagesAfterToc) {
+    pluginOptions.numberPagesAfterToc = false;
+  }
+  if (!pluginOptions.concurrency) {
+    pluginOptions.concurrency = Math.max(1, Math.min(4, os.cpus().length));
   }
 
   ensureArray(pluginOptions, "ignoreDocs");

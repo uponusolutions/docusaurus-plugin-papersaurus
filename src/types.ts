@@ -22,6 +22,10 @@ export interface PluginOptions {
   margins?: Margins;
   coverMargins?: Margins;
   author?: string;
+  /**
+   * @deprecated Ignored since 3.6.5. TOC page numbers are read from a render of the final layout,
+   * so no footer text has to be parsed any more. Still accepted for backwards compatibility.
+   */
   footerParser?: RegExp;
   keepDebugHtmls?: boolean;
   puppeteerTimeout?: number;
@@ -33,7 +37,41 @@ export interface PluginOptions {
   useExtraPaths?: UsePath[];
   ignoreCssSelectors?: string[];
   getPdfFileName?: FileNameFunction;
+  /**
+   * Per-sidebar document title, as a string or a locale → title map. Replaces the projectName as
+   * the root label and file name of that sidebar's PDF.
+   */
+  sidebarTitles?: Record<string, LocalizedString>;
+  /**
+   * Generate one PDF over all sidebars and list it as the "complete version" on every page,
+   * including the site root. false = off.
+   */
+  completePdf?: false | CompletePdfOptions;
+  /**
+   * Structure the PDFs like the sidebar: every page sits at its sidebar depth (headings shift down
+   * accordingly), categories without a page get a heading, page titles drop the parent titles in
+   * front, and the TOC and the bookmarks nest along the sidebar. false keeps one flat level per page.
+   */
+  structureBySidebar?: boolean;
+  /**
+   * Render the TOC separately, so the page numbers start at 1 on the first content page and the TOC
+   * pages are not counted. The page functions get `part` = 'toc' for the TOC pages.
+   */
+  numberPagesAfterToc?: boolean;
 }
+
+/** The part of the PDF a page function renders. */
+export type PdfPart = 'cover' | 'toc' | 'content';
+
+/** A plain string, or a map from locale (e.g. "en", "de") to the string for that locale. */
+export type LocalizedString = string | Record<string, string>;
+
+export type CompletePdfOptions = {
+  /** Title of the complete PDF (cover page, page header, download menu). */
+  title: LocalizedString;
+  /** File name without extension, default "complete". */
+  fileName?: string;
+};
 
 export type PapersaurusPluginOptions = Required<PluginOptions>;
 
@@ -42,7 +80,8 @@ export type PageFunction = (
   pluginConfig: PapersaurusPluginOptions,
   pageTitle: string,
   version: string,
-  language: string
+  language: string,
+  part?: PdfPart
 ) => string;
 
 export type FileNameFunction = (
